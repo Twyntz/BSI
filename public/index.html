@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="fr">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Projet BSi 2.0</title>
+    <link rel="stylesheet" href="assets/css/app.css">
+    <script defer src="assets/js/app.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+</head>
+
+<body class="min-h-screen bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-50">
+    <div class="min-h-screen flex flex-col">
+        <!-- Header -->
+        <header class="border-b border-slate-200 bg-white/80 backdrop-blur dark:border-slate-800 dark:bg-slate-950/80">
+            <div class="mx-auto max-w-6xl px-4 py-4 flex items-center justify-between gap-4">
+                <div class="flex items-center gap-3">
+                    <div
+                        class="h-10 w-10 rounded-xl bg-gradient-to-tr from-sky-500 to-emerald-400 flex items-center justify-center shadow-lg shadow-sky-500/30">
+                        <span class="text-lg font-semibold text-slate-950">BSI</span>
+                    </div>
+                    <div>
+                        <h1 class="text-lg sm:text-xl font-semibold tracking-tight">
+                            BSI Generator
+                        </h1>
+                        <p class="text-xs sm:text-sm text-slate-500 dark:text-slate-400">
+                            Assistant de génération des Bilans Sociaux Individuels
+                        </p>
+                    </div>
+                </div>
+
+                <div class="flex items-center gap-4">
+                    <!-- Infos campagne -->
+                    <div class="hidden sm:flex items-center gap-3 text-xs text-slate-500 dark:text-slate-400">
+                        <div class="flex flex-col items-end">
+                            <span id="campaign-year-label"
+                                class="uppercase tracking-wide text-[10px] text-slate-500 dark:text-slate-400">
+                                Campagne en cours
+                            </span>
+                            <span id="campaign-year-value" class="font-medium text-slate-900 dark:text-slate-100">
+                                2025
+                            </span>
+                        </div>
+                        <div class="h-10 w-px bg-slate-200 dark:bg-slate-800"></div>
+                        <div class="flex flex-col items-end">
+                            <span class="uppercase tracking-wide text-[10px] text-slate-500 dark:text-slate-400">
+                                Statut
+                            </span>
+                            <span id="global-status-badge"
+                                class="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-700 dark:text-emerald-300">
+                                <span class="h-1.5 w-1.5 rounded-full bg-emerald-500 dark:bg-emerald-400"></span>
+                                Prêt pour la génération
+                            </span>
+                        </div>
+                    </div>
+
+                    <!-- Toggle thème -->
+                    <button id="theme-toggle" type="button"
+                        class="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-medium text-slate-700 shadow-sm hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800">
+                        <span id="theme-toggle-icon" class="text-xs">🌙</span>
+                        <span id="theme-toggle-label">Thème sombre</span>
+                    </button>
+                </div>
+            </div>
+        </header>
+
+        <!-- Contenu principal -->
+        <main class="flex-1">
+            <div class="mx-auto max-w-6xl px-4 py-8 lg:py-10 grid gap-8 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
+                <!-- Colonne gauche : description & résumé -->
+                <section class="space-y-6">
+                    <!-- Intro / contexte RH -->
+                    <div
+                        class="rounded-2xl border border-slate-200 bg-white p-6 shadow-lg shadow-slate-200/60 dark:border-slate-800 dark:bg-gradient-to-br dark:from-slate-900/80 dark:to-slate-950/80 dark:shadow-slate-950/70">
+                        <h2 class="text-base font-semibold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                            <span
+                                class="inline-flex h-6 w-6 items-center justify-center rounded-full bg-sky-500/10 text-sky-600 dark:bg-sky-500/20 dark:text-sky-300 text-xs">
+                                1
+                            </span>
+                            Préparez vos fichiers de paie
+                        </h2>
+                        <p class="mt-3 text-sm leading-relaxed text-slate-700 dark:text-slate-300">
+                            Importez les exports de paie nécessaires pour générer automatiquement les
+                            Bilans Sociaux Individuels (BSI) pour l’ensemble des collaborateurs.
+                        </p>
+                        <ul class="mt-4 space-y-2 text-sm text-slate-700 dark:text-slate-300">
+                            <li class="flex items-start gap-2">
+                                <span class="mt-1 h-1.5 w-1.5 rounded-full bg-sky-500"></span>
+                                <span><strong>BSI Money</strong> : rémunérations, primes, cotisations.</span>
+                            </li>
+                            <li class="flex items-start gap-2">
+                                <span class="mt-1 h-1.5 w-1.5 rounded-full bg-sky-500"></span>
+                                <span><strong>BSI Jours</strong> : jours travaillés, absences.</span>
+                            </li>
+                            <li class="flex items-start gap-2">
+                                <span class="mt-1 h-1.5 w-1.5 rounded-full bg-sky-500"></span>
+                                <span><strong>Descriptions collaborateurs</strong> : identité, poste, contrat.</span>
+                            </li>
+                        </ul>
+                    </div>
+
+                    <!-- Résumé / stats -->
+                    <div
+                        class="rounded-2xl border border-slate-200 bg-white p-5 shadow-md shadow-slate-200/60 dark:border-slate-800 dark:bg-slate-950/70">
+                        <div class="flex items-center justify-between gap-4">
+                            <h3 class="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                                Résumé de la génération
+                            </h3>
+                            <span id="run-badge"
+                                class="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-500 dark:bg-slate-800 dark:text-slate-300">
+                                En attente de lancement
+                            </span>
+                        </div>
+
+                        <div class="mt-4 grid gap-4 sm:grid-cols-3">
+                            <div
+                                class="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-900/60">
+                                <p class="text-xs text-slate-500 dark:text-slate-400">Collaborateurs détectés</p>
+                                <p id="stat-total-employees"
+                                    class="mt-2 text-2xl font-semibold text-slate-900 dark:text-slate-50">
+                                    –
+                                </p>
+                            </div>
+                            <div
+                                class="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-900/60">
+                                <p class="text-xs text-slate-500 dark:text-slate-400">Forfaits jours détectés</p>
+                                <p id="stat-forfait-jours"
+                                    class="mt-2 text-2xl font-semibold text-sky-600 dark:text-sky-300">
+                                    –
+                                </p>
+                            </div>
+                            <div
+                                class="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-900/60">
+                                <p class="text-xs text-slate-500 dark:text-slate-400">Fichiers générés</p>
+                                <p id="stat-files-generated"
+                                    class="mt-2 text-2xl font-semibold text-emerald-600 dark:text-emerald-300">
+                                    –
+                                </p>
+                            </div>
+                        </div>
+
+                        <div id="download-wrapper" class="mt-4 hidden">
+                            <a id="download-link" href="#"
+                                class="inline-flex items-center gap-2 rounded-full bg-emerald-500/10 px-3 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-300 dark:hover:bg-emerald-500/20">
+                                Télécharger le bundle BSI
+                            </a>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Colonne droite : formulaire & progression -->
+                <section class="space-y-6">
+                    <!-- Formulaire principal -->
+                    <form id="bsi-form"
+                        class="rounded-2xl border border-slate-200 bg-white p-6 shadow-md shadow-slate-200/60 dark:border-slate-800 dark:bg-slate-950/80 space-y-6">
+                        <div class="flex items-center justify-between gap-4">
+                            <div>
+                                <h2 class="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                                    Import des fichiers de paie
+                                </h2>
+                                <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                                    Les fichiers restent traités en interne ; aucune donnée ne quitte votre
+                                    environnement.
+                                </p>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <label for="campaign-year"
+                                    class="text-[11px] font-medium text-slate-500 dark:text-slate-400">
+                                    Année de campagne
+                                </label>
+                                <input id="campaign-year" name="campaign_year" type="number" min="2000" max="2100"
+                                    class="w-20 rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs text-slate-900 shadow-sm focus:border-sky-500 focus:outline-none focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-100"
+                                    value="2025" />
+                            </div>
+                        </div>
+
+                        <div class="space-y-4">
+                            <!-- BSI Money -->
+                            <div
+                                class="rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-900/60">
+                                <div class="flex items-center justify-between gap-2">
+                                    <div>
+                                        <p class="text-xs font-medium text-slate-900 dark:text-slate-100">
+                                            Fichier BSI Money
+                                        </p>
+                                        <p class="text-[11px] text-slate-500 dark:text-slate-400">
+                                            Export paie contenant les montants de rémunération et cotisations.
+                                        </p>
+                                    </div>
+                                    <span
+                                        class="rounded-full bg-sky-500/10 px-2 py-0.5 text-[10px] font-medium text-sky-700 dark:text-sky-300">
+                                        CSV
+                                    </span>
+                                </div>
+                                <label
+                                    class="mt-3 flex cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-center hover:border-sky-500/70 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900/60 dark:hover:bg-slate-900/90">
+                                    <span class="text-[11px] font-medium text-slate-900 dark:text-slate-200">
+                                        Sélectionner le fichier BSI Money
+                                    </span>
+                                    <span id="label-bsi-money" class="mt-1 text-[11px] text-slate-500">
+                                        Aucun fichier sélectionné
+                                    </span>
+                                    <input id="input-bsi-money" name="bsi_money" type="file" accept=".csv"
+                                        class="hidden" />
+                                </label>
+                            </div>
+
+                            <!-- BSI Jours -->
+                            <div
+                                class="rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-900/60">
+                                <div class="flex items-center justify-between gap-2">
+                                    <div>
+                                        <p class="text-xs font-medium text-slate-900 dark:text-slate-100">
+                                            Fichier BSI Jours
+                                        </p>
+                                        <p class="text-[11px] text-slate-500 dark:text-slate-400">
+                                            Export des jours travaillés, congés, RTT, etc.
+                                        </p>
+                                    </div>
+                                    <span
+                                        class="rounded-full bg-sky-500/10 px-2 py-0.5 text-[10px] font-medium text-sky-700 dark:text-sky-300">
+                                        CSV
+                                    </span>
+                                </div>
+                                <label
+                                    class="mt-3 flex cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-center hover:border-sky-500/70 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900/60 dark:hover:bg-slate-900/90">
+                                    <span class="text-[11px] font-medium text-slate-900 dark:text-slate-200">
+                                        Sélectionner le fichier BSI Jours
+                                    </span>
+                                    <span id="label-bsi-jours" class="mt-1 text-[11px] text-slate-500">
+                                        Aucun fichier sélectionné
+                                    </span>
+                                    <input id="input-bsi-jours" name="bsi_jours" type="file" accept=".csv"
+                                        class="hidden" />
+                                </label>
+                            </div>
+
+                            <!-- Descriptions collaborateurs -->
+                            <div
+                                class="rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-900/60">
+                                <div class="flex items-center justify-between gap-2">
+                                    <div>
+                                        <p class="text-xs font-medium text-slate-900 dark:text-slate-100">
+                                            Fichiers de description collaborateurs
+                                        </p>
+                                        <p class="text-[11px] text-slate-500 dark:text-slate-400">
+                                            Un ou plusieurs CSV contenant nom, prénom, poste, contrat…
+                                        </p>
+                                    </div>
+                                    <span
+                                        class="rounded-full bg-sky-500/10 px-2 py-0.5 text-[10px] font-medium text-sky-700 dark:text-sky-300">
+                                        CSV (multi)
+                                    </span>
+                                </div>
+                                <label
+                                    class="mt-3 flex cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-center hover:border-sky-500/70 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900/60 dark:hover:bg-slate-900/90">
+                                    <span class="text-[11px] font-medium text-slate-900 dark:text-slate-200">
+                                        Sélectionner les fichiers de descriptions
+                                    </span>
+                                    <span id="label-bsi-description" class="mt-1 text-[11px] text-slate-500">
+                                        Aucun fichier sélectionné
+                                    </span>
+                                    <input id="input-bsi-description" name="bsi_description[]" type="file" accept=".csv"
+                                        multiple class="hidden" />
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="flex items-center justify-between gap-4 pt-2">
+                            <p class="text-[11px] text-slate-500 dark:text-slate-400">
+                                Les BSI seront générés à partir des modèles Excel standard et forfait jours.
+                            </p>
+                            <button id="submit-button" type="submit"
+                                class="inline-flex items-center gap-2 rounded-full bg-sky-600 px-4 py-2 text-xs font-semibold text-white shadow-lg shadow-sky-500/40 hover:bg-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-500 focus:ring-offset-2 focus:ring-offset-slate-50 dark:focus:ring-offset-slate-950 disabled:cursor-not-allowed disabled:opacity-60">
+                                <span id="submit-button-label">Lancer la génération</span>
+                                <span id="submit-button-spinner"
+                                    class="hidden h-3 w-3 animate-spin rounded-full border border-slate-900 border-l-transparent">
+                                </span>
+                            </button>
+                        </div>
+                    </form>
+
+                    <!-- Progression & logs -->
+                    <div
+                        class="rounded-2xl border border-slate-200 bg-white p-5 shadow-md shadow-slate-200/60 dark:border-slate-800 dark:bg-slate-950/80 space-y-4">
+                        <div class="flex items-center justify-between gap-4">
+                            <h3 class="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                                Progression de la génération
+                            </h3>
+                            <span id="progress-label" class="text-[11px] text-slate-500 dark:text-slate-400">
+                                En attente du lancement
+                            </span>
+                        </div>
+
+                        <div class="w-full rounded-full bg-slate-100 p-0.5 dark:bg-slate-900/80">
+                            <div id="progress-bar"
+                                class="h-2 w-0 rounded-full bg-gradient-to-r from-sky-500 to-emerald-400 transition-all duration-300 ease-out">
+                            </div>
+                        </div>
+
+                        <div>
+                            <p class="text-[11px] font-medium text-slate-500 dark:text-slate-400 mb-1">
+                                Journal des opérations
+                            </p>
+                            <div id="logs"
+                                class="max-h-40 overflow-y-auto rounded-xl border border-slate-200 bg-slate-50 p-3 text-[11px] text-slate-700 space-y-1 font-mono dark:border-slate-900 dark:bg-slate-950/80 dark:text-slate-300">
+                                <p class="text-slate-500 dark:text-slate-500">En attente du lancement de la génération…
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+            </div>
+        </main>
+
+        <!-- Footer -->
+        <footer class="border-t border-slate-200 bg-white/90 dark:border-slate-900 dark:bg-slate-950/90">
+            <div
+                class="mx-auto max-w-6xl px-4 py-3 flex flex-col sm:flex-row items-center justify-between gap-2 text-[11px] text-slate-500 dark:text-slate-500">
+                <span>BSI Generator · Outil interne RH</span>
+                <span>Génération annuelle des Bilans Sociaux Individuels</span>
+            </div>
+        </footer>
+    </div>
+</body>
+
+</html>
