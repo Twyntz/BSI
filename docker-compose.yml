@@ -1,0 +1,17 @@
+version: "3.9"
+
+services:
+  bsi-app:
+    build: .
+    container_name: bsi-generator
+    ports:
+      - "8000:8000"
+    environment:
+      # Tu peux forcer des valeurs ici ou les laisser dans .env
+      OUTPUT_PATH: "storage/output"
+      PATH_TEMPLATE_XLSX: "storage/templates/excel/TemplateBsi.xlsx"
+      PATH_TEMPLATE_FJ_XLSX: "storage/templates/excel/TemplateBsiFJ.xlsx"
+    volumes:
+      # Optionnel : si tu veux pouvoir modifier les fichiers sans rebuild
+      - ./:/var/www/html
+    restart: unless-stopped
