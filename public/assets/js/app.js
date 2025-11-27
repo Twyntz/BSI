@@ -8,15 +8,18 @@ document.addEventListener("DOMContentLoaded", () => {
 
     function applyTheme(theme) {
         const root = document.documentElement;
+
+        // Tailwind v4 browser : thème piloté par data-theme
+        root.setAttribute("data-theme", theme);
+
         if (theme === "dark") {
-            root.classList.add("dark");
             if (themeToggleIcon) themeToggleIcon.textContent = "🌙";
             if (themeToggleLabel) themeToggleLabel.textContent = "Thème sombre";
         } else {
-            root.classList.remove("dark");
             if (themeToggleIcon) themeToggleIcon.textContent = "☀️";
             if (themeToggleLabel) themeToggleLabel.textContent = "Thème clair";
         }
+
         localStorage.setItem("bsi_theme", theme);
     }
 
@@ -25,16 +28,19 @@ document.addEventListener("DOMContentLoaded", () => {
     if (storedTheme === "light" || storedTheme === "dark") {
         applyTheme(storedTheme);
     } else {
-        const prefersDark = window.matchMedia &&
+        const prefersDark =
+            window.matchMedia &&
             window.matchMedia("(prefers-color-scheme: dark)").matches;
-        applyTheme(prefersDark ? "dark" : "dark"); // tu peux mettre "light" si tu veux par défaut
+        // Mets "light" ici si tu veux clair par défaut
+        applyTheme(prefersDark ? "dark" : "dark");
     }
 
     if (themeToggleBtn) {
         themeToggleBtn.addEventListener("click", () => {
-            const current = document.documentElement.classList.contains("dark")
-                ? "dark"
-                : "light";
+            const current =
+                document.documentElement.getAttribute("data-theme") === "dark"
+                    ? "dark"
+                    : "light";
             const next = current === "dark" ? "light" : "dark";
             applyTheme(next);
         });
@@ -45,21 +51,29 @@ document.addEventListener("DOMContentLoaded", () => {
     const form = document.getElementById("bsi-form");
     const submitButton = document.getElementById("submit-button");
     const submitButtonLabel = document.getElementById("submit-button-label");
-    const submitButtonSpinner = document.getElementById("submit-button-spinner");
+    const submitButtonSpinner = document.getElementById(
+        "submit-button-spinner"
+    );
 
     const inputBsiMoney = document.getElementById("input-bsi-money");
     const inputBsiJours = document.getElementById("input-bsi-jours");
-    const inputBsiDescription = document.getElementById("input-bsi-description");
+    const inputBsiDescription = document.getElementById(
+        "input-bsi-description"
+    );
 
     const labelBsiMoney = document.getElementById("label-bsi-money");
     const labelBsiJours = document.getElementById("label-bsi-jours");
-    const labelBsiDescription = document.getElementById("label-bsi-description");
+    const labelBsiDescription = document.getElementById(
+        "label-bsi-description"
+    );
 
     const progressBar = document.getElementById("progress-bar");
     const progressLabel = document.getElementById("progress-label");
     const logsContainer = document.getElementById("logs");
 
-    const statTotalEmployees = document.getElementById("stat-total-employees");
+    const statTotalEmployees = document.getElementById(
+        "stat-total-employees"
+    );
     const statForfaitJours = document.getElementById("stat-forfait-jours");
     const statFilesGenerated = document.getElementById("stat-files-generated");
 
@@ -122,13 +136,33 @@ document.addEventListener("DOMContentLoaded", () => {
             "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium";
 
         if (variant === "running") {
-            runBadge.classList.add("bg-sky-100", "text-sky-700", "dark:bg-sky-500/10", "dark:text-sky-300");
+            runBadge.classList.add(
+                "bg-sky-100",
+                "text-sky-700",
+                "dark:bg-sky-500/10",
+                "dark:text-sky-300"
+            );
         } else if (variant === "success") {
-            runBadge.classList.add("bg-emerald-100", "text-emerald-700", "dark:bg-emerald-500/10", "dark:text-emerald-300");
+            runBadge.classList.add(
+                "bg-emerald-100",
+                "text-emerald-700",
+                "dark:bg-emerald-500/10",
+                "dark:text-emerald-300"
+            );
         } else if (variant === "error") {
-            runBadge.classList.add("bg-red-100", "text-red-700", "dark:bg-red-500/10", "dark:text-red-300");
+            runBadge.classList.add(
+                "bg-red-100",
+                "text-red-700",
+                "dark:bg-red-500/10",
+                "dark:text-red-300"
+            );
         } else {
-            runBadge.classList.add("bg-slate-100", "text-slate-500", "dark:bg-slate-800", "dark:text-slate-300");
+            runBadge.classList.add(
+                "bg-slate-100",
+                "text-slate-500",
+                "dark:bg-slate-800",
+                "dark:text-slate-300"
+            );
         }
     }
 
@@ -190,8 +224,15 @@ document.addEventListener("DOMContentLoaded", () => {
         form.addEventListener("submit", async (event) => {
             event.preventDefault();
 
-            if (!inputBsiMoney?.files.length || !inputBsiJours?.files.length || !inputBsiDescription?.files.length) {
-                appendLog("Merci de sélectionner tous les fichiers requis avant de lancer la génération.", "error");
+            if (
+                !inputBsiMoney?.files.length ||
+                !inputBsiJours?.files.length ||
+                !inputBsiDescription?.files.length
+            ) {
+                appendLog(
+                    "Merci de sélectionner tous les fichiers requis avant de lancer la génération.",
+                    "error"
+                );
                 setRunStatus("Champs manquants", "error");
                 return;
             }
@@ -210,7 +251,10 @@ document.addEventListener("DOMContentLoaded", () => {
                 formData.append("bsi_description[]", file);
             }
             if (campaignYearInput) {
-                formData.append("campaign_year", campaignYearInput.value || "");
+                formData.append(
+                    "campaign_year",
+                    campaignYearInput.value || ""
+                );
             }
 
             try {
@@ -230,26 +274,46 @@ document.addEventListener("DOMContentLoaded", () => {
                 const result = await response.json();
 
                 if (!result.success) {
-                    throw new Error(result.error || "Une erreur inconnue est survenue pendant la génération.");
+                    throw new Error(
+                        result.error ||
+                            "Une erreur inconnue est survenue pendant la génération."
+                    );
                 }
 
-                appendLog("Lecture des CSV et détection des collaborateurs terminées.");
-                if (typeof result.totalEmployees === "number" && statTotalEmployees) {
+                appendLog(
+                    "Lecture des CSV et détection des collaborateurs terminées."
+                );
+                if (
+                    typeof result.totalEmployees === "number" &&
+                    statTotalEmployees
+                ) {
                     statTotalEmployees.textContent = result.totalEmployees;
                 }
-                if (typeof result.forfaitJoursCount === "number" && statForfaitJours) {
+                if (
+                    typeof result.forfaitJoursCount === "number" &&
+                    statForfaitJours
+                ) {
                     statForfaitJours.textContent = result.forfaitJoursCount;
                 }
-                if (typeof result.filesGenerated === "number" && statFilesGenerated) {
+                if (
+                    typeof result.filesGenerated === "number" &&
+                    statFilesGenerated
+                ) {
                     statFilesGenerated.textContent = result.filesGenerated;
                 }
 
                 if (result.downloadUrl && downloadLink && downloadWrapper) {
                     downloadLink.href = result.downloadUrl;
                     downloadWrapper.classList.remove("hidden");
-                    appendLog("Bundle BSI généré avec succès. Prêt au téléchargement.", "success");
+                    appendLog(
+                        "Bundle BSI généré avec succès. Prêt au téléchargement.",
+                        "success"
+                    );
                 } else {
-                    appendLog("Génération terminée, mais aucun bundle à télécharger n'a été fourni.", "info");
+                    appendLog(
+                        "Génération terminée, mais aucun bundle à télécharger n'a été fourni.",
+                        "info"
+                    );
                 }
 
                 setProgress(100, "Génération terminée");
