@@ -1,38 +1,39 @@
 # 📊 BSI Generator – Application Web RH
 
-**BSI Generator** est une application web interne permettant de générer automatiquement les **Bilans Sociaux Individuels (BSI)** à partir d’exports de paie au format CSV.
-
-Elle remplace un outil Python existant par une version **100% web**, plus simple à utiliser, sans installation, et accessible depuis un simple navigateur.
+**BSI Generator** est une application web interne permettant de générer automatiquement les **Bilans Sociaux Individuels (BSI)** à partir d’exports de paie au format CSV, Excel ou XLS.  
+Il remplace d’anciens scripts manuels ou Python par une interface **100% web**, moderne, intelligente et entièrement locale.
 
 ---
 
 ## ✅ Fonctionnalités principales
 
-- 📥 **Import** des fichiers paie :
-  - BSI Money (montants, cotisations, primes…)
-  - BSI Jours (jours travaillés / RTT…)
-  - Descriptions collaborateurs (identité, poste, contrat…)
+### 📥 Import multi‑formats
+- Support des fichiers **.csv**, **.xlsx**, **.xls**
+- Import de :
+  - **BSI Money** (rémunération, primes, cotisations)
+  - **BSI Jours** (temps de travail, RTT…)
+  - **Descriptions collaborateurs** (identité, poste, contrat…) – *multi-upload*
 
-- 🤖 **Analyse automatique**
-  - Fusion des données par collaborateur
-  - Calcul des cotisations & rémunération brute
-  - Détection automatique des salariés **au forfait jours**
+### 🤖 Parsing intelligent
+- Détection automatique des colonnes (Nom, Prénom, Matricule…)
+- Tolérance aux variations de format :  
+  > Exemple : “DUPONT T” → “Thierry DUPONT”
+- Nettoyage des caractères spéciaux & encodages
+- Fusion automatique des données par collaborateur
 
-- 📄 **Génération automatique**
-  - 1 fichier Excel **par collaborateur**
-  - Sélection automatique du bon template :
-    - `TemplateBsi.xlsx` (standard)
-    - `TemplateBsiFJ.xlsx` (forfait jours)
+### 📄 Génération PDF native
+- Production de **PDF vectoriels** via mPDF
+- Mise en page dynamique en HTML/CSS
+- Graphiques Donut en **SVG natif**
 
-- 🎨 **Interface moderne**
-  - Design Tailwind
-  - Mode **clair / sombre**
-  - Journal d’exécution + statistiques
-  - Téléchargement d’un ZIP final
+### 🧮 Logique métier intégrée
+- Calcul du **brut annuel**
+- Agrégation des cotisations (Salariales & Patronales)
+- Détection automatique **Forfait Jours / Heures**
 
-- 🔒 **Confidentialité totale**
-  - Tous les traitements sont réalisés **en local**
-  - Aucun envoi de données vers l’extérieur
+### 🔒 Sécurité & confidentialité
+- Traitement **100% local**, aucune donnée envoyée vers l'extérieur
+- Suppression automatique des fichiers temporaires
 
 ---
 
@@ -40,136 +41,107 @@ Elle remplace un outil Python existant par une version **100% web**, plus simple
 
 ```
 bsi-web/
-├── public/                     # Interface utilisateur + API
-│   ├── index.html              # Application web RH
-│   ├── assets/
-│   │   ├── js/app.js           # Front logic (upload, thème, requêtes)
-│   │   └── css/app.css         # (Optionnel si Tailwind CDN)
-│   └── api/generate-bsi.php    # Point d'entrée backend
+├── public/                         # Interface + API
+│   ├── index.html                  # Application web RH
+│   ├── assets/                     # JS & CSS
+│   └── api/
+│       ├── generate-bsi.php        # Génération PDF
+│       └── test-bsi.php            # Endpoint de test
 │
 ├── src/
-│   ├── Application/
-│   │   └── Services/
-│   │       └── BsiGenerationService.php
-│   ├── Http/
-│   │   └── Controllers/
-│   │       └── GenerateBsiController.php
-│   └── Infrastructure/
-│       ├── Csv/CsvEmployeeReader.php
-│       ├── Excel/BsiExcelGenerator.php
-│       └── Storage/LocalFilesystemStorage.php
+│   ├── Application/Services/
+│   │   └── BsiGenerationService.php
+│   ├── Infrastructure/
+│   │   ├── Csv/CsvEmployeeReader.php
+│   │   └── Pdf/BsiPdfGenerator.php
 │
 ├── storage/
-│   ├── output/                 # Fichiers générés (zip + xlsx)
-│   └── templates/excel/        # Templates BSI
-│       ├── TemplateBsi.xlsx
-│       └── TemplateBsiFJ.xlsx
+│   └── output/                     # PDF générés (ignoré par Git)
 │
-├── .env
+├── docker-compose.yml
+├── Dockerfile
 ├── composer.json
-└── README.md
+└── .env
 ```
 
 ---
 
-## ✅ Prérequis
+## 🧰 Prérequis techniques
 
-- PHP **8.1+**
+### 🔹 **Option A – Docker (recommandé)**
+- Docker Desktop
+- Docker Compose
+
+### 🔹 **Option B – Installation locale**
+- PHP **8.2+**
+- Extensions : `gd`, `mbstring`, `zip`, `xml`
 - Composer
-- Navigateur moderne (Chrome, Edge, Firefox…)
 
 ---
 
-## 🚀 Installation
+## 🚀 Installation & lancement
 
+### 🛠️ Étape 1 : Installation
 ```bash
-git clone <repo>
+git clone <votre-repo-git>
 cd bsi-web
-composer install
+composer install   # si utilisation hors Docker
 ```
 
-Créer un fichier `.env` à la racine :
+### ⚙️ Étape 2 : Configuration
+Créer un fichier `.env` :
 
 ```env
 OUTPUT_PATH=storage/output
-PATH_TEMPLATE_XLSX=storage/templates/excel/TemplateBsi.xlsx
-PATH_TEMPLATE_FJ_XLSX=storage/templates/excel/TemplateBsiFJ.xlsx
 ```
 
----
+### ▶️ Étape 3 : Démarrage
 
-## ▶️ Lancement
+#### Via Docker :
+```bash
+docker-compose up -d --build
+```
+👉 Application disponible sur : **http://localhost:8000**
 
-Démarrer le serveur PHP intégré :
-
+#### Via PHP :
 ```bash
 php -S localhost:8000 -t public
 ```
-
-Accéder à l’application :
-
-👉 http://localhost:8000
 
 ---
 
 ## 🧩 Utilisation
 
-1. Ouvrir l'application dans le navigateur
-2. Sélectionner :
-   - **BSI Money.csv**
-   - **BSI Jours.csv**
-   - **1 ou plusieurs descriptions.csv**
-3. Choisir l’année de campagne
-4. Cliquer sur **Lancer la génération**
-5. Télécharger le ZIP généré
+1. Préparer vos fichiers :
+   - Money  
+   - Jours  
+   - Descriptions (plusieurs possibles)
+2. Ouvrir l’application : **http://localhost:8000**
+3. Glisser‑déposer les fichiers dans l’interface
+4. Lancer la génération
+5. Télécharger l’archive ZIP contenant un PDF par collaborateur
 
 ---
 
 ## 📁 Sortie générée
 
-- `BSI_<Nom>.xlsx` pour chaque collaborateur
-- Un fichier ZIP regroupant l’ensemble
-- Utilisation automatique du template FJ si RTT détectés
+- 1 fichier **PDF par collaborateur**
+- Une archive ZIP contenant l’ensemble
+- Mise en page professionnelle conforme à la charte RH
 
 ---
 
-## 🌙 Mode sombre / clair
+## 🔒 Gestion des données sensibles
 
-- Géré automatiquement via Tailwind
-- Toggle dans l’interface
-- Mémorisation du choix via `localStorage`
-
----
-
-## 🔧 Technologies
-
-- PHP 8+
-- PhpSpreadsheet
-- Tailwind CSS
-- JavaScript Vanilla
-- Dotenv
-
----
-
-## ✅ Avantages
-
-- Aucun logiciel à installer
-- Simplicité d’utilisation
-- Maintien de confidentialité
-- Reproductible chaque année
-- Code structuré & maintenable
-
----
-
-## 🏁 Prochaines évolutions possibles
-
-- Export PDF automatique
-- Historique des générations
-- Validation avancée des CSV
-- Authentification interne
+- Le `.gitignore` exclut strictement :
+  - `/storage`
+  - `/vendor`
+  - `.env`
+- Les fichiers temporaires sont automatiquement nettoyés
+- Environnement 100% interne
 
 ---
 
 ## 📜 Licence
 
-Usage interne – Non destiné à diffusion publique.
+Usage interne exclusivement – réservé au service RH.

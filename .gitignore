@@ -1,3 +1,28 @@
+# --- Dépendances PHP ---
 /vendor/
+composer.lock
+
+# --- Fichiers système & IDE ---
+.DS_Store
+.idea/
+.vscode/
+
+# --- Variables d'environnement (Mots de passe, config locale) ---
+.env
+# Tu peux laisser .env.example si tu en as un pour montrer quelles variables sont requises
+
+# --- Dossiers de stockage temporaire & résultats ---
+# On ne veut pas que les PDF générés ou les fichiers uploadés finissent sur internet
 /storage/
-/public/storage/ 
+/public/RESULT/
+
+# --- Au cas où des fichiers traînent à la racine ---
+*.log
+*.zip
+*.pdf
+*.csv
+*.xlsx
+*.xls
+
+# Mais on veut garder le fichier .gitignore lui-même !
+!.gitignore
