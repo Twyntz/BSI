@@ -31,7 +31,6 @@ document.addEventListener("DOMContentLoaded", () => {
         const prefersDark =
             window.matchMedia &&
             window.matchMedia("(prefers-color-scheme: dark)").matches;
-        // Mets "light" ici si tu veux clair par défaut
         applyTheme(prefersDark ? "dark" : "dark");
     }
 
@@ -84,6 +83,9 @@ document.addEventListener("DOMContentLoaded", () => {
     const campaignYearInput = document.getElementById("campaign-year");
     const campaignYearValue = document.getElementById("campaign-year-value");
 
+    const testForfaitHeureBtn = document.getElementById("test-forfait-heure");
+    const testForfaitJourBtn = document.getElementById("test-forfait-jour");
+
     // Helpers UI
     function setButtonLoading(isLoading) {
         if (!submitButton || !submitButtonLabel || !submitButtonSpinner) return;
@@ -126,7 +128,10 @@ document.addEventListener("DOMContentLoaded", () => {
         if (statForfaitJours) statForfaitJours.textContent = "–";
         if (statFilesGenerated) statFilesGenerated.textContent = "–";
         if (downloadWrapper) downloadWrapper.classList.add("hidden");
-        if (downloadLink) downloadLink.removeAttribute("href");
+        if (downloadLink) {
+            downloadLink.removeAttribute("href");
+            downloadLink.textContent = "Télécharger le bundle BSI";
+        }
     }
 
     function setRunStatus(text, variant = "idle") {
@@ -219,7 +224,86 @@ document.addEventListener("DOMContentLoaded", () => {
         syncCampaignYear();
     }
 
-    // Soumission du formulaire
+    // --- Actions de test : forfait heures / forfait jours ------------------
+
+    async function runTestBsi(type) {
+        if (logsContainer) logsContainer.innerHTML = "";
+        resetStats();
+        setProgress(5, "Préparation du BSI de test…");
+        setRunStatus("Génération d'un BSI de test…", "running");
+        appendLog(
+            type === "forfait_heure"
+                ? "Lancement du test PDF BSI forfait heures (valeurs à 0)…"
+                : "Lancement du test PDF BSI forfait jours (valeurs à 0)…"
+        );
+
+        try {
+            setProgress(25, "Appel du backend de test…");
+
+            const response = await fetch(
+                "api/test-bsi.php?type=" + encodeURIComponent(type),
+                {
+                    method: "POST",
+                }
+            );
+
+            setProgress(50, "Génération du PDF de test en cours…");
+
+            if (!response.ok) {
+                throw new Error(`Erreur HTTP ${response.status}`);
+            }
+
+            const result = await response.json();
+
+            if (!result.success) {
+                throw new Error(
+                    result.error ||
+                        "Une erreur est survenue lors de la génération du BSI de test."
+                );
+            }
+
+            if (result.downloadUrl && downloadLink && downloadWrapper) {
+                downloadLink.href = result.downloadUrl;
+                downloadLink.textContent =
+                    type === "forfait_heure"
+                        ? "Télécharger le BSI de test (forfait heures)"
+                        : "Télécharger le BSI de test (forfait jours)";
+                downloadWrapper.classList.remove("hidden");
+                appendLog(
+                    "BSI de test généré avec succès. PDF prêt au téléchargement.",
+                    "success"
+                );
+            } else {
+                appendLog(
+                    "Génération de test terminée, mais aucun PDF à télécharger n'a été fourni.",
+                    "info"
+                );
+            }
+
+            setProgress(100, "BSI de test généré");
+            setRunStatus("BSI de test généré", "success");
+        } catch (error) {
+            console.error(error);
+            appendLog(`Erreur (test BSI) : ${error.message}`, "error");
+            setRunStatus("Erreur lors du BSI de test", "error");
+            setProgress(0, "Erreur");
+        }
+    }
+
+    if (testForfaitHeureBtn) {
+        testForfaitHeureBtn.addEventListener("click", () => {
+            runTestBsi("forfait_heure");
+        });
+    }
+
+    if (testForfaitJourBtn) {
+        testForfaitJourBtn.addEventListener("click", () => {
+            runTestBsi("forfait_jour");
+        });
+    }
+
+    // --- Soumission du formulaire principal (génération réelle) -----------
+
     if (form) {
         form.addEventListener("submit", async (event) => {
             event.preventDefault();
@@ -281,7 +365,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 }
 
                 appendLog(
-                    "Lecture des CSV et détection des collaborateurs terminées."
+                    "Lecture des fichiers et détection des collaborateurs terminées."
                 );
                 if (
                     typeof result.totalEmployees === "number" &&
@@ -293,20 +377,23 @@ document.addEventListener("DOMContentLoaded", () => {
                     typeof result.forfaitJoursCount === "number" &&
                     statForfaitJours
                 ) {
-                    statForfaitJours.textContent = result.forfaitJoursCount;
+                    statForfaitJours.textContent =
+                        result.forfaitJoursCount;
                 }
                 if (
                     typeof result.filesGenerated === "number" &&
                     statFilesGenerated
                 ) {
-                    statFilesGenerated.textContent = result.filesGenerated;
+                    statFilesGenerated.textContent =
+                        result.filesGenerated;
                 }
 
                 if (result.downloadUrl && downloadLink && downloadWrapper) {
                     downloadLink.href = result.downloadUrl;
+                    downloadLink.textContent = "Télécharger le bundle BSI";
                     downloadWrapper.classList.remove("hidden");
                     appendLog(
-                        "Bundle BSI généré avec succès. Prêt au téléchargement.",
+                        "Bundle BSI généré avec succès. ZIP prêt au téléchargement.",
                         "success"
                     );
                 } else {

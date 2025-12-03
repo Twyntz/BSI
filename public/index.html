@@ -1,19 +1,25 @@
 <!DOCTYPE html>
 <html lang="fr" data-theme="dark">
-
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Projet BSi 2.0</title>
+
+    <!-- Favicon -->
     <link rel="icon" type="image/x-icon" href="/favicon.ico">
-    <link rel="stylesheet" href="assets/css/app.css">
-    <script defer src="assets/js/app.js"></script>
-    <!-- Tailwind v4 -->
+
+    <!-- Tailwind v4 (browser) -->
     <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
     <style type="text/tailwindcss">
-        /* On dit à Tailwind : le variant `dark:` est actif quand [data-theme="dark"] est présent */
+        /* Active les classes `dark:` quand data-theme="dark" est présent */
         @custom-variant dark (&:where([data-theme=dark], [data-theme=dark] *));
     </style>
+
+    <!-- Ton CSS perso (optionnel) -->
+    <link rel="stylesheet" href="assets/css/app.css">
+
+    <!-- JS front -->
+    <script defer src="assets/js/app.js"></script>
 </head>
 
 <body class="min-h-screen bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-50">
@@ -104,6 +110,14 @@
                                 <span><strong>Descriptions collaborateurs</strong> : identité, poste, contrat.</span>
                             </li>
                         </ul>
+
+                        <div class="mt-6 rounded-xl border border-dashed border-slate-300/70 bg-slate-50/70 px-4 py-3 text-[11px] text-slate-600 dark:border-slate-700 dark:bg-slate-900/60 dark:text-slate-300">
+                            <p class="font-semibold mb-1">Mode test des modèles BSI</p>
+                            <p>
+                                Vous pouvez tester le rendu PDF des modèles <strong>forfait heures</strong> et
+                                <strong>forfait jours</strong> avec des valeurs à 0, sans utiliser de données réelles.
+                            </p>
+                        </div>
                     </div>
 
                     <!-- Résumé / stats -->
@@ -196,7 +210,7 @@
                                     </div>
                                     <span
                                         class="rounded-full bg-sky-500/10 px-2 py-0.5 text-[10px] font-medium text-sky-700 dark:text-sky-300">
-                                        CSV
+                                        Excel / CSV
                                     </span>
                                 </div>
                                 <label
@@ -207,8 +221,8 @@
                                     <span id="label-bsi-money" class="mt-1 text-[11px] text-slate-500">
                                         Aucun fichier sélectionné
                                     </span>
-                                    <input id="input-bsi-money" name="bsi_money" type="file" accept=".csv"
-                                        class="hidden" />
+                                    <input id="input-bsi-money" name="bsi_money" type="file"
+                                        accept=".csv,.xlsx,.xls" class="hidden" />
                                 </label>
                             </div>
 
@@ -226,7 +240,7 @@
                                     </div>
                                     <span
                                         class="rounded-full bg-sky-500/10 px-2 py-0.5 text-[10px] font-medium text-sky-700 dark:text-sky-300">
-                                        CSV
+                                        Excel / CSV
                                     </span>
                                 </div>
                                 <label
@@ -237,8 +251,8 @@
                                     <span id="label-bsi-jours" class="mt-1 text-[11px] text-slate-500">
                                         Aucun fichier sélectionné
                                     </span>
-                                    <input id="input-bsi-jours" name="bsi_jours" type="file" accept=".csv"
-                                        class="hidden" />
+                                    <input id="input-bsi-jours" name="bsi_jours" type="file"
+                                        accept=".csv,.xlsx,.xls" class="hidden" />
                                 </label>
                             </div>
 
@@ -251,12 +265,12 @@
                                             Fichiers de description collaborateurs
                                         </p>
                                         <p class="text-[11px] text-slate-500 dark:text-slate-400">
-                                            Un ou plusieurs CSV contenant nom, prénom, poste, contrat…
+                                            Un ou plusieurs fichiers Excel / CSV contenant nom, prénom, poste, contrat…
                                         </p>
                                     </div>
                                     <span
                                         class="rounded-full bg-sky-500/10 px-2 py-0.5 text-[10px] font-medium text-sky-700 dark:text-sky-300">
-                                        CSV (multi)
+                                        Excel / CSV (multi)
                                     </span>
                                 </div>
                                 <label
@@ -267,23 +281,43 @@
                                     <span id="label-bsi-description" class="mt-1 text-[11px] text-slate-500">
                                         Aucun fichier sélectionné
                                     </span>
-                                    <input id="input-bsi-description" name="bsi_description[]" type="file" accept=".csv"
-                                        multiple class="hidden" />
+                                    <input id="input-bsi-description" name="bsi_description[]" type="file"
+                                        accept=".csv,.xlsx,.xls" multiple class="hidden" />
                                 </label>
                             </div>
                         </div>
 
-                        <div class="flex items-center justify-between gap-4 pt-2">
-                            <p class="text-[11px] text-slate-500 dark:text-slate-400">
-                                Les BSI seront générés à partir des modèles Excel standard et forfait jours.
-                            </p>
-                            <button id="submit-button" type="submit"
-                                class="inline-flex items-center gap-2 rounded-full bg-sky-600 px-4 py-2 text-xs font-semibold text-white shadow-lg shadow-sky-500/40 hover:bg-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-500 focus:ring-offset-2 focus:ring-offset-slate-50 dark:focus:ring-offset-slate-950 disabled:cursor-not-allowed disabled:opacity-60">
-                                <span id="submit-button-label">Lancer la génération</span>
-                                <span id="submit-button-spinner"
-                                    class="hidden h-3 w-3 animate-spin rounded-full border border-slate-900 border-l-transparent">
-                                </span>
-                            </button>
+                        <!-- Actions principales -->
+                        <div class="flex flex-col gap-3 pt-2">
+                            <div class="flex items-center justify-between gap-4">
+                                <p class="text-[11px] text-slate-500 dark:text-slate-400">
+                                    Les BSI seront générés au format PDF, à partir des modèles standard et forfait jours.
+                                </p>
+                                <button id="submit-button" type="submit"
+                                    class="inline-flex items-center gap-2 rounded-full bg-sky-600 px-4 py-2 text-xs font-semibold text-white shadow-lg shadow-sky-500/40 hover:bg-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-500 focus:ring-offset-2 focus:ring-offset-slate-50 dark:focus:ring-offset-slate-950 disabled:cursor-not-allowed disabled:opacity-60">
+                                    <span id="submit-button-label">Lancer la génération</span>
+                                    <span id="submit-button-spinner"
+                                        class="hidden h-3 w-3 animate-spin rounded-full border border-slate-900 border-l-transparent">
+                                    </span>
+                                </button>
+                            </div>
+
+                            <!-- Boutons de test forfait heures / jours -->
+                            <div class="mt-2 rounded-xl border border-dashed border-slate-300/80 bg-slate-50/80 px-3 py-3 dark:border-slate-700 dark:bg-slate-900/60">
+                                <p class="text-[11px] font-medium text-slate-600 dark:text-slate-300 mb-2">
+                                    Tester le rendu PDF des modèles BSI (valeurs à 0)
+                                </p>
+                                <div class="flex flex-col sm:flex-row gap-2">
+                                    <button id="test-forfait-heure" type="button"
+                                        class="inline-flex items-center justify-center gap-1 rounded-full border border-sky-500/60 bg-white px-3 py-1.5 text-[11px] font-medium text-sky-700 hover:bg-sky-50 dark:border-sky-400/70 dark:bg-slate-900 dark:text-sky-300 dark:hover:bg-slate-800">
+                                        <span>Test forfait heures</span>
+                                    </button>
+                                    <button id="test-forfait-jour" type="button"
+                                        class="inline-flex items-center justify-center gap-1 rounded-full border border-emerald-500/60 bg-white px-3 py-1.5 text-[11px] font-medium text-emerald-700 hover:bg-emerald-50 dark:border-emerald-400/70 dark:bg-slate-900 dark:text-emerald-300 dark:hover:bg-slate-800">
+                                        <span>Test forfait jours</span>
+                                    </button>
+                                </div>
+                            </div>
                         </div>
                     </form>
 
@@ -330,5 +364,4 @@
         </footer>
     </div>
 </body>
-
 </html>

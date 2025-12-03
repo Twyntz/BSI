@@ -5,6 +5,8 @@ declare(strict_types=1);
 
 namespace App\Infrastructure\Csv;
 
+use PhpOffice\PhpSpreadsheet\IOFactory;
+
 class CsvEmployeeReader
 {
     /** @var string[] */
@@ -95,6 +97,8 @@ class CsvEmployeeReader
     /**
      * Point d'entrée principal : équivalent de csv_bsi_read()
      *
+     * Les fichiers peuvent être en CSV ou en Excel (.xlsx/.xls).
+     *
      * @param string   $bsiMoneyPath
      * @param string   $bsiJoursPath
      * @param string[] $descriptionPaths
@@ -111,25 +115,24 @@ class CsvEmployeeReader
         $this->officialNames = [];
 
         // 1. Lecture du BSI Money
-        $moneyRows = $this->readCsvFile($bsiMoneyPath);
+        $moneyRows = $this->readTableFile($bsiMoneyPath);
         if (count($moneyRows) === 0) {
             return [];
         }
 
         $this->extractNameBsiMoney($moneyRows);
         $this->createLibelle();
-
         $this->extractValueBsiMoney($moneyRows);
 
         // 2. Lecture du BSI Jours
-        $joursRows = $this->readCsvFile($bsiJoursPath);
+        $joursRows = $this->readTableFile($bsiJoursPath);
         if (count($joursRows) > 0) {
             $this->extractValueJoursBsi($joursRows);
         }
 
-        // 3. Lecture des descriptions collaborateurs (plusieurs CSV)
+        // 3. Lecture des descriptions collaborateurs (plusieurs fichiers)
         foreach ($descriptionPaths as $path) {
-            $descRows = $this->readCsvFile($path);
+            $descRows = $this->readTableFile($path);
             if (count($descRows) === 0) {
                 continue;
             }
@@ -143,8 +146,31 @@ class CsvEmployeeReader
     }
 
     // ---------------------------------------------------------------------
-    // Utils
+    // Utils : lecture CSV ou XLSX
     // ---------------------------------------------------------------------
+
+    /**
+     * Lit un fichier tabulaire :
+     * - CSV (séparateur ';')
+     * - ou Excel (.xlsx / .xls), 1ère feuille
+     *
+     * @return array<int,array<int,string>>
+     */
+    private function readTableFile(string $path): array
+    {
+        if (!is_file($path)) {
+            throw new \RuntimeException("Fichier introuvable : {$path}");
+        }
+
+        $ext = strtolower(pathinfo($path, PATHINFO_EXTENSION));
+
+        if ($ext === 'csv') {
+            return $this->readCsvFile($path);
+        }
+
+        // Sinon on passe par PhpSpreadsheet (xlsx, xls, ods…)
+        return $this->readExcelFile($path);
+    }
 
     /**
      * Lecture d'un CSV avec séparateur ';'
@@ -153,10 +179,6 @@ class CsvEmployeeReader
      */
     private function readCsvFile(string $path): array
     {
-        if (!is_file($path)) {
-            throw new \RuntimeException("Fichier CSV introuvable : {$path}");
-        }
-
         $rows = [];
         $handle = fopen($path, 'r');
         if ($handle === false) {
@@ -164,11 +186,37 @@ class CsvEmployeeReader
         }
 
         while (($row = fgetcsv($handle, 0, ';')) !== false) {
-            // Normalise en tableau de string
             $rows[] = array_map(static fn($v) => $v ?? '', $row);
         }
 
         fclose($handle);
+
+        return $rows;
+    }
+
+    /**
+     * Lecture d'un fichier Excel (1ère feuille) en tableau de lignes/colonnes
+     *
+     * @return array<int,array<int,string>>
+     */
+    private function readExcelFile(string $path): array
+    {
+        $spreadsheet = IOFactory::load($path);
+        $sheet = $spreadsheet->getActiveSheet();
+
+        $rows = [];
+
+        foreach ($sheet->getRowIterator() as $row) {
+            $cellIterator = $row->getCellIterator();
+            $cellIterator->setIterateOnlyExistingCells(false);
+
+            $rowData = [];
+            foreach ($cellIterator as $cell) {
+                $value = $cell->getValue();
+                $rowData[] = $value === null ? '' : (string)$value;
+            }
+            $rows[] = $rowData;
+        }
 
         return $rows;
     }
@@ -179,16 +227,13 @@ class CsvEmployeeReader
      */
     private function normaliserChaine(string $chaine): string
     {
-        // Tentative de translittération (accents -> ASCII)
         $str = iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $chaine);
         if ($str === false) {
             $str = $chaine;
         }
 
-        // Ne garder que lettres + espaces
         $str = preg_replace('/[^a-zA-Z ]+/', '', $str) ?? '';
 
-        // Trim des espaces parasites
         return trim($str);
     }
 
@@ -197,8 +242,7 @@ class CsvEmployeeReader
     // ---------------------------------------------------------------------
 
     /**
-     * Équivalent de extract_name_bsi_money()
-     * On récupère la liste des personnes sur la ligne 3.
+     * Équivalent de extract_name_bsi_money() : ligne 3 = liste des personnes
      *
      * @param array<int,array<int,string>> $rows
      */
@@ -208,7 +252,7 @@ class CsvEmployeeReader
             return;
         }
 
-        $headerRow = $rows[2]; // 3ème ligne (index 2)
+        $headerRow = $rows[2];
         $this->persons = [];
         $this->officialNames = [];
 
@@ -220,13 +264,6 @@ class CsvEmployeeReader
         }
     }
 
-    /**
-     * Initialisation du tableau $data[person] :
-     * - official_name
-     * - tous les libellés avec salarial/patronal à 0
-     * - champs description ("nom", "prenom", ...) à "no data"
-     * - flag forfait_jours = false
-     */
     private function createLibelle(): void
     {
         foreach ($this->persons as $index => $person) {
@@ -235,7 +272,6 @@ class CsvEmployeeReader
             $this->data[$person] = [];
             $this->data[$person]['official_name'] = $officialName;
 
-            // Initialisation des montants
             foreach ($this->listLibelleMoney as $libelle) {
                 $this->data[$person][$libelle] = [
                     'salarial' => 0,
@@ -243,19 +279,15 @@ class CsvEmployeeReader
                 ];
             }
 
-            // Initialisation des champs de description
             foreach ($this->descriptionFields as $field) {
                 $this->data[$person][$field] = 'no data';
             }
 
-            // Flag forfait jours
             $this->data[$person]['forfait_jours'] = false;
         }
     }
 
     /**
-     * Recherche des index (Code, Libellé, Base S.) dans les colonnes.
-     *
      * @param array<int,array<int,string>> $rows
      * @return array{codeIndex:int,libelleIndex:int,startValueIndex:int}
      */
@@ -323,7 +355,6 @@ class CsvEmployeeReader
                 $salarial = $row[$salarialIndex] ?? '';
                 $patronal = $row[$patronalIndex] ?? '';
 
-                // Détection forfait jours
                 if (in_array($libelle, $this->forfaitJoursKeywords, true)) {
                     $hasValue = (trim($baseS) !== '' || trim($salarial) !== '' || trim($patronal) !== '');
                     if ($hasValue) {
@@ -331,7 +362,6 @@ class CsvEmployeeReader
                     }
                 }
 
-                // Données de salaire / cotisations classiques
                 $this->getDataBsiMoney($person, $libelle, $baseS, $salarial, $patronal);
 
                 $tempStartIndex += 3;
@@ -339,9 +369,6 @@ class CsvEmployeeReader
         }
     }
 
-    /**
-     * Équivalent de get_data_bsi_money()
-     */
     private function getDataBsiMoney(
         string $person,
         string $libelle,
@@ -370,15 +397,9 @@ class CsvEmployeeReader
     // JOURS BSI
     // ---------------------------------------------------------------------
 
-    /**
-     * Équivalent de extract_value_jours_bsi()
-     *
-     * @param array<int,array<int,string>> $rows
-     */
     private function extractValueJoursBsi(array $rows): void
     {
         foreach ($rows as $row) {
-            // On s'assure que les indices existent
             if (!isset($row[2], $row[3])) {
                 continue;
             }
@@ -397,7 +418,6 @@ class CsvEmployeeReader
                     && $row[2] !== ''
                     && $row[3] !== ''
                 ) {
-                    // real_working_day_count
                     $value = $row[6] ?? '0';
                     $realWorkingDayCount = str_replace(',', '.', $value);
 
@@ -419,11 +439,6 @@ class CsvEmployeeReader
     // DESCRIPTIONS BSI
     // ---------------------------------------------------------------------
 
-    /**
-     * Équivalent de extract_value_bsi_description()
-     *
-     * @param array<int,array<int,string>> $rows
-     */
     private function extractValueBsiDescription(array $rows): void
     {
         foreach ($rows as $row) {
@@ -445,9 +460,11 @@ class CsvEmployeeReader
                     && $row[0] !== ''
                     && $row[1] !== ''
                 ) {
-                    // On remplit les champs dans l'ordre : nom, prenom, poste, anciennete, date_arrivee, type_contrat
                     foreach ($this->descriptionFields as $index => $field) {
-                        if (!array_key_exists($field, $this->data[$person]) || $this->data[$person][$field] === 'no data') {
+                        if (
+                            !array_key_exists($field, $this->data[$person]) ||
+                            $this->data[$person][$field] === 'no data'
+                        ) {
                             $this->data[$person][$field] = $row[$index] ?? '';
                         }
                     }
@@ -461,9 +478,6 @@ class CsvEmployeeReader
     // AGRÉGATION DES COTISATIONS
     // ---------------------------------------------------------------------
 
-    /**
-     * Équivalent de sum_bsi_money()
-     */
     private function sumBsiMoney(): void
     {
         foreach ($this->persons as $person) {
