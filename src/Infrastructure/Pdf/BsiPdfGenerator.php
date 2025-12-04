@@ -18,7 +18,7 @@ class BsiPdfGenerator
     }
 
     // =========================================================================
-    // 1. POINT D'ENTRÉE : MODE TEST (Garde la compatibilité existante)
+    // 1. POINT D'ENTRÉE : MODE TEST
     // =========================================================================
 
     public function generateTestBsi(string $type, int $campaignYear): string
@@ -33,50 +33,36 @@ class BsiPdfGenerator
         $fileLabel = $type === 'forfait_heure' ? 'FORFAIT_HEURES' : 'FORFAIT_JOURS';
         $filename  = sprintf('TEST_BSI_%s_%d.pdf', $fileLabel, $campaignYear);
         
-        // On récupère des données "Fake" (toutes à 0) via notre nouvelle structure
         $viewModel = $this->getTestViewModel($type, $campaignYear);
 
-        // On génère le PDF
         return $this->generatePdf($viewModel, $filename, "BSI de test - {$labelType} {$campaignYear}");
     }
 
     // =========================================================================
-    // 2. POINT D'ENTRÉE : MODE RÉEL (Nouveau)
+    // 2. POINT D'ENTRÉE : MODE RÉEL
     // =========================================================================
 
-    /**
-     * Génère un BSI réel à partir des données extraites du Reader.
-     */
     public function generateRealBsi(array $employeeData, int $campaignYear): string
     {
         $this->ensureOutputDirExists();
 
-        // Mapping des données brutes vers le ViewModel standardisé
         $viewModel = $this->mapDataToViewModel($employeeData, $campaignYear);
 
-        // Nettoyage du nom pour le fichier
         $safeName = preg_replace('/[^a-zA-Z0-9_-]/', '', $viewModel['identity']['nom_complet']);
         $filename = sprintf('BSI_%d_%s.pdf', $campaignYear, $safeName);
 
-        // Génération
         return $this->generatePdf($viewModel, $filename, "BSI {$campaignYear} - {$viewModel['identity']['nom_complet']}");
     }
 
     // =========================================================================
-    // 3. LOGIQUE DE MAPPING (Le Cœur du changement)
+    // 3. LOGIQUE DE MAPPING
     // =========================================================================
 
-    /**
-     * Transforme les données brutes du CsvReader en structure propre pour le PDF.
-     */
     private function mapDataToViewModel(array $data, int $campaignYear): array
     {
-        // Helpers pour nettoyer les montants (ex: "1 200,00" -> 1200.00)
         $parse = fn($val) => $this->parseAmount($val);
-
         $isForfaitJours = ($data['forfait_jours'] ?? false) === true;
         
-        // --- 1. Identité ---
         $nom    = $data['nom'] ?? '';
         $prenom = $data['prenom'] ?? '';
         
@@ -90,21 +76,16 @@ class BsiPdfGenerator
             'type_contrat'     => $data['type_contrat'] ?? 'CDI',
             'label_type'       => $isForfaitJours ? 'Forfait jours' : 'Forfait heures',
             'jours_travailles' => $data['nb jours travaillés'] ?? '0',
-            'is_test'          => false, // Drapeau pour masquer le bandeau "TEST" si besoin
+            'is_test'          => false,
         ];
 
-        // --- 2. Rémunération (Salarial) ---
-        // Les clés ici doivent correspondre exactement aux libellés dans CsvEmployeeReader
         $salaireBase = $parse($data['Salaire de base']['salarial'] ?? 0);
         $heuresSupp  = $parse($data['Heures mensuelles majorées']['salarial'] ?? 0);
-        
-        // Primes : on additionne "Sous-total Primes" et potentiellement d'autres si besoin
         $primes      = $parse($data['Sous-total Primes']['salarial'] ?? 0);
         $interessement = $parse($data['INTERESSEMENT']['salarial'] ?? 0);
+        // AJOUT ACOMPTES
+        $acomptes    = $parse($data['Acomptes']['salarial'] ?? 0);
 
-        // Calcul du total annuel brut
-        // Note : On peut soit le recalculer, soit prendre "Salaire Brut" du fichier si dispo.
-        // Ici on recalcule pour être cohérent avec le breakdown.
         $totalBrutAnnuel = $salaireBase + $heuresSupp + $primes + $interessement;
         
         $remuneration = [
@@ -112,13 +93,22 @@ class BsiPdfGenerator
             'heures_supp'        => $heuresSupp,
             'prime_annuelle'     => $primes,
             'interessement'      => $interessement,
+            'acomptes'           => $acomptes, // Ajouté au tableau
             'total_brut_annuel'  => $totalBrutAnnuel,
             'total_mensuel'      => $totalBrutAnnuel / 12,
             'equiv_mois'         => ($salaireBase > 0) ? ($totalBrutAnnuel / ($salaireBase / 12)) : 0,
         ];
 
-        // --- 3. Protection Sociale (Patronal & Salarial) ---
-        // Les clés 'retraite', 'maladie'... sont agrégées par le CsvReader
+        // --- AVANTAGES SOCIAUX ---
+        $transport = $parse($data['Frais de transport personnel non soumis']['salarial'] ?? 0) 
+                   + $parse($data['Frais de transport personnel non soumis']['patronal'] ?? 0);
+        
+        $socialExtra = [
+            'transport' => $transport,
+            'cheques'   => 190.0,
+        ];
+
+        // --- COTISATIONS ---
         $social = [];
         $categories = ['maladie', 'retraite', 'prevoyance', 'chomage', 'mutuelle'];
 
@@ -129,14 +119,11 @@ class BsiPdfGenerator
             ];
         }
 
-        // Totaux sociaux (optionnel pour le footer du tableau)
         $social['total'] = [
             'salarial' => array_sum(array_column($social, 'salarial')),
             'patronal' => array_sum(array_column($social, 'patronal')),
         ];
 
-        // --- 4. Pouvoir d'achat (Net) ---
-        // "Net imposable" ou "Net a payer" selon ce qui est dispo dans le reader
         $netAnnuel = $parse($data['Net imposable']['salarial'] ?? 0);
 
         $pouvoirAchat = [
@@ -147,15 +134,13 @@ class BsiPdfGenerator
         return [
             'identity'     => $identity,
             'remuneration' => $remuneration,
+            'social_extra' => $socialExtra,
             'social'       => $social,
             'pouvoir_achat'=> $pouvoirAchat,
             'campaign_year'=> $campaignYear,
         ];
     }
 
-    /**
-     * Crée un ViewModel vide pour le mode TEST.
-     */
     private function getTestViewModel(string $type, int $campaignYear): array
     {
         $isForfaitJours = ($type === 'forfait_jour');
@@ -179,9 +164,14 @@ class BsiPdfGenerator
                 'heures_supp'       => 0.0,
                 'prime_annuelle'    => 0.0,
                 'interessement'     => 0.0,
+                'acomptes'          => 0.0,
                 'total_brut_annuel' => 0.0,
                 'total_mensuel'     => 0.0,
                 'equiv_mois'        => 0.0,
+            ],
+            'social_extra' => [
+                'transport' => 0.0,
+                'cheques'   => 190.0,
             ],
             'social' => [
                 'maladie'    => ['salarial' => 0, 'patronal' => 0],
@@ -199,21 +189,21 @@ class BsiPdfGenerator
     }
 
     // =========================================================================
-    // 4. RENDU PDF (Agnostique : ne sait pas si c'est du test ou du réel)
+    // 4. RENDU PDF
     // =========================================================================
 
     private function generatePdf(array $viewModel, string $filename, string $title): string
     {
-        // Construction du HTML via le ViewModel unifié
         $html = $this->renderHtml($viewModel);
 
         $path = $this->outputDir . '/' . $filename;
 
+        // Marge du haut 30mm (optimisée pour single page)
         $mpdf = new Mpdf([
             'format'        => 'A4',
             'margin_left'   => 5,
             'margin_right'  => 5,
-            'margin_top'    => 5,
+            'margin_top'    => 30, 
             'margin_bottom' => 5,
         ]);
 
@@ -224,29 +214,22 @@ class BsiPdfGenerator
         return $filename;
     }
 
-    /**
-     * Remplace l'ancienne "buildTestHtml".
-     * Elle prend maintenant le $viewModel standardisé.
-     */
     private function renderHtml(array $vm): string
     {
-        // Extraction pour simplifier la syntaxe dans le HEREDOC
-        $dIdent = $vm['identity'];
-        $dRemu  = $vm['remuneration'];
-        $dSoc   = $vm['social'];
-        $dPower = $vm['pouvoir_achat'];
-        $year   = $vm['campaign_year'];
+        $dIdent    = $vm['identity'];
+        $dRemu     = $vm['remuneration'];
+        $dSocExtra = $vm['social_extra'];
+        $dSoc      = $vm['social'];
+        $dPower    = $vm['pouvoir_achat'];
+        $year      = $vm['campaign_year'];
 
-        // Formatage des nombres
         $fmt = fn($v) => number_format((float)$v, 0, ',', ' ') . ' €';
-        $fmtDec = fn($v) => number_format((float)$v, 1, ',', ' '); // Pour "12,5 mois"
+        $fmtDec = fn($v) => number_format((float)$v, 1, ',', ' ');
 
-        // Labels
         $montantAnnuelLabel  = $fmt($dRemu['total_brut_annuel']);
         $montantMensuelLabel = $fmt($dRemu['total_mensuel']);
         $equivMoisLabel      = $fmtDec($dRemu['equiv_mois']);
 
-        // Données Donut
         $remuBreakdown = [
             ['label' => 'Salaire de base annuel', 'color' => '#00B050', 'value' => $dRemu['base_annuelle']],
             ['label' => 'Heures supplémentaires', 'color' => '#FF00FF', 'value' => $dRemu['heures_supp']],
@@ -256,22 +239,42 @@ class BsiPdfGenerator
         $remuBreakdown = $this->computePercentages($remuBreakdown);
         $donutSvg      = $this->buildDonutSvg($remuBreakdown);
 
-        // Variables CSS/Couleurs (identiques à avant)
-        $headerGreyBg  = '#D9D9D9'; $headerGrey = '#595959'; $blueCartouche = '#305496';
-        $greenMain     = '#00B050'; $greenLight = '#E2F0D9'; $borderGrey = '#A6A6A6';
-        $lightGrey     = '#F2F2F2'; $darkText = '#002060';   $greyText = '#555555';
-        $rowBlue       = '#D9EAF7';
+        // --- RESSOURCES ---
+        $assetsDir = dirname(__DIR__, 3) . '/public/assets/img/';
+        
+        $logoPath = $assetsDir . 'synergie.png';
+        $logoHtml = file_exists($logoPath) 
+            ? '<img src="' . $logoPath . '" style="height: 40px; vertical-align: middle;" alt="Synergie" />'
+            : '<span style="color: #FFFFFF; font-weight: bold; font-size: 14pt;">SYNERGIE</span>';
 
-        // Message de bas de page conditionnel
+        $getIcon = function($file) use ($assetsDir) {
+            $path = $assetsDir . $file;
+            if (file_exists($path)) {
+                return '<img src="' . $path . '" style="height: 30px; width: auto; vertical-align: middle;" />';
+            }
+            return '';
+        };
+
+        $iconAnciennete = $getIcon('anciennete.png');
+        $iconArrivee    = $getIcon('arrive.png');
+        $iconContrat    = $getIcon('contrat.jpg');
+        $iconTravail    = $getIcon('travaille.jpg');
+
+        // Couleurs
+        $headerDarkBg = '#333333'; 
+        $greenMain    = '#00B050'; 
+        $greenLight   = '#E2F0D9'; 
+        $borderGrey   = '#A6A6A6';
+        $lightGrey    = '#F2F2F2'; 
+        $darkText     = '#002060';   
+        $greyText     = '#555555';
+        $rowBlue      = '#D9EAF7';
+
         $noteBasDePage = $dIdent['is_test'] 
             ? "Les valeurs sont volontairement nulles pour ce BSI de test." 
             : "Document confidentiel généré automatiquement.";
 
-        // --- HTML TEMPLATE (Condensé pour la lisibilité ici, reprendre ton CSS complet) ---
-        // J'insère juste les variables $vm aux bons endroits
-        
-        // CSS (je garde ton CSS existant, il est très bien)
-        $css = $this->getCssDefinition($headerGreyBg, $headerGrey, $blueCartouche, $greenMain, $greenLight, $borderGrey, $lightGrey, $darkText, $greyText, $rowBlue);
+        $css = $this->getCssDefinition($headerDarkBg, $greenMain, $greenLight, $borderGrey, $lightGrey, $darkText, $greyText, $rowBlue);
 
         $html = <<<HTML
 <!DOCTYPE html>
@@ -282,33 +285,85 @@ class BsiPdfGenerator
     <style>{$css}</style>
 </head>
 <body>
-<div class="page">
-    <table class="header-table">
-        <tr>
-            <td class="header-left" style="width: 65%;">
-                SYNERGIE DÉVELOPPEMENT<br><span class="header-left-sub">Talents & Habitat</span>
-            </td>
-            <td class="header-right" style="width: 35%;">
-                Bilan Social Individuel<br>{$year}
-            </td>
-        </tr>
-    </table>
 
+    <htmlpageheader name="mainHeader">
+        <div style="background-color: {$headerDarkBg}; padding: 10px 15px;">
+            <table style="width: 100%; border-collapse: collapse;">
+                <tr>
+                    <td style="text-align: left; vertical-align: middle; width: 50%;">
+                        {$logoHtml}
+                    </td>
+                    <td style="text-align: right; vertical-align: middle; width: 50%; color: #FFFFFF; font-weight: bold; font-size: 12pt;">
+                        Bilan Social Individuel<br>
+                        <span style="color: #cccccc; font-size: 10pt; font-weight: normal;">Campagne {$year}</span>
+                    </td>
+                </tr>
+            </table>
+        </div>
+    </htmlpageheader>
+
+<div class="page">
+    
     <table class="identity-table">
-        <tr class="identity-name-row"><td>{$dIdent['nom_complet']}</td></tr>
-        <tr class="identity-poste-row"><td>{$dIdent['poste']}</td></tr>
+        <tr class="identity-name-row">
+            <td>{$dIdent['nom_complet']}</td>
+        </tr>
+        <tr class="identity-poste-row">
+            <td>{$dIdent['poste']}</td>
+        </tr>
     </table>
 
     <table class="info-line-table">
         <tr>
-            <td style="width: 25%;"><span class="info-label">Ancienneté</span><br><span class="info-value">{$dIdent['anciennete']}</span></td>
-            <td style="width: 25%;"><span class="info-label">Date d'arrivée</span><br><span class="info-value">{$dIdent['date_arrivee']}</span></td>
-            <td style="width: 25%;"><span class="info-label">Contrat</span><br><span class="info-value">{$dIdent['type_contrat']}</span></td>
-            <td style="width: 25%;"><span class="info-label">Jours travaillés</span><br><span class="info-value">{$dIdent['jours_travailles']}</span></td>
+            <td style="width: 25%;">
+                <table style="width: 100%; border: none;">
+                    <tr>
+                        <td style="width: 35px; border: none; text-align: center; vertical-align: middle;">{$iconAnciennete}</td>
+                        <td style="border: none; vertical-align: middle;">
+                            <span class="info-label">Ancienneté</span><br>
+                            <span class="info-value">{$dIdent['anciennete']}</span>
+                        </td>
+                    </tr>
+                </table>
+            </td>
+            <td style="width: 25%;">
+                <table style="width: 100%; border: none;">
+                    <tr>
+                        <td style="width: 35px; border: none; text-align: center; vertical-align: middle;">{$iconArrivee}</td>
+                        <td style="border: none; vertical-align: middle;">
+                            <span class="info-label">Date d'arrivée</span><br>
+                            <span class="info-value">{$dIdent['date_arrivee']}</span>
+                        </td>
+                    </tr>
+                </table>
+            </td>
+            <td style="width: 25%;">
+                <table style="width: 100%; border: none;">
+                    <tr>
+                        <td style="width: 35px; border: none; text-align: center; vertical-align: middle;">{$iconContrat}</td>
+                        <td style="border: none; vertical-align: middle;">
+                            <span class="info-label">Contrat</span><br>
+                            <span class="info-value">{$dIdent['type_contrat']}</span>
+                        </td>
+                    </tr>
+                </table>
+            </td>
+            <td style="width: 25%;">
+                <table style="width: 100%; border: none;">
+                    <tr>
+                        <td style="width: 35px; border: none; text-align: center; vertical-align: middle;">{$iconTravail}</td>
+                        <td style="border: none; vertical-align: middle;">
+                            <span class="info-label">Jours travaillés</span><br>
+                            <span class="info-value">{$dIdent['jours_travailles']}</span>
+                        </td>
+                    </tr>
+                </table>
+            </td>
         </tr>
     </table>
 
     <div class="section-title">TA REMUNERATION BRUTE ANNUELLE TOTALE</div>
+    
     <div class="remu-section">
         <table class="remu-overview-table">
             <tr>
@@ -334,18 +389,47 @@ class BsiPdfGenerator
                         <tr><td class="remu-detail-label">Prime annuelle</td><td class="remu-detail-amount">{$fmt($dRemu['prime_annuelle'])}</td></tr>
                         <tr><td class="remu-detail-label">Prime d'intéressement</td><td class="remu-detail-amount">{$fmt($dRemu['interessement'])}</td></tr>
                     </table>
+                    
                     <table class="remu-highlight-table">
-                        <tr><td class="remu-highlight-label">Ton brut annuel :</td><td class="remu-highlight-amount">{$montantAnnuelLabel}</td></tr>
+                        <tr>
+                            <td class="remu-highlight-label">Ton brut annuel :</td>
+                            <td class="remu-highlight-amount">{$montantAnnuelLabel}</td>
+                        </tr>
+                        <tr>
+                            <td class="remu-highlight-label">Acompte sur le salaire :</td>
+                            <td class="remu-highlight-amount">{$fmt($dRemu['acomptes'])}</td>
+                        </tr>
                     </table>
                 </td>
                 <td style="width: 45%;">
-                    <div class="donut-wrapper">{$donutSvg}<div class="donut-caption">Répartition brute</div></div>
+                    <div class="donut-wrapper">{$donutSvg}</div>
                 </td>
             </tr>
         </table>
     </div>
 
     <div class="section-title">TES CHARGES SOCIALES & AVANTAGES SOCIAUX</div>
+    
+    <table class="social-extra">
+        <tr>
+            <td style="width: 33%;">
+                <div class="social-extra-amount">{$fmt($dSocExtra['transport'])}</div>
+                <div class="social-extra-label">de frais de transport</div>
+            </td>
+            <td style="width: 33%;">
+                <div class="social-extra-amount">{$fmt($dSocExtra['cheques'])}</div>
+                <div class="social-extra-label">
+                    de chèques cadeaux<br>
+                    <span class="social-extra-small">(si présence en novembre {$year})</span>
+                </div>
+            </td>
+            <td style="width: 34%;">
+                <div class="social-extra-label" style="font-weight:bold;">Hors remise personnelle sur achat</div>
+                <div class="social-extra-small">(dans la limite de 20 000 € tous les 3 ans)</div>
+            </td>
+        </tr>
+    </table>
+
     <table class="social-table">
         <thead>
             <tr><th style="width: 40%;"></th><th style="width: 30%;">Collaborateur (Salarial)</th><th style="width: 30%;">Employeur (Patronal)</th></tr>
@@ -366,14 +450,22 @@ class BsiPdfGenerator
         </tfoot>
     </table>
 
-    <div class="section-title">TON POUVOIR D'ACHAT</div>
-    <table class="power-table">
-        <thead><tr><th style="width: 60%;">Élément</th><th style="width: 40%;">Montant</th></tr></thead>
-        <tbody>
-            <tr><td>Net à payer annuel</td><td>{$fmt($dPower['net_annuel'])}</td></tr>
-            <tr><td>Net à payer moyen par mois</td><td>{$fmt($dPower['net_mensuel'])}</td></tr>
-        </tbody>
-    </table>
+    <div class="section-title-spaced">TON POUVOIR D'ACHAT</div>
+    
+    <div class="power-box">
+        <table style="width: 100%; border-collapse: collapse;">
+            <tr>
+                <td style="width: 50%; text-align: center; border-right: 1px solid #CCCCCC;">
+                    <div style="font-size: 10pt; font-weight: bold; color: #555;">Net à payer annuel</div>
+                    <div style="font-size: 16pt; font-weight: 800; color: #000; margin-top: 3px;">{$fmt($dPower['net_annuel'])}</div>
+                </td>
+                <td style="width: 50%; text-align: center;">
+                    <div style="font-size: 10pt; font-weight: bold; color: #555;">Net à payer moyen par mois</div>
+                    <div style="font-size: 16pt; font-weight: 800; color: #000; margin-top: 3px;">{$fmt($dPower['net_mensuel'])}</div>
+                </td>
+            </tr>
+        </table>
+    </div>
 
     <div class="note-text">{$noteBasDePage}</div>
     <div class="footer">BSI généré automatiquement – {$dIdent['label_type']} · {$year}</div>
@@ -395,10 +487,6 @@ HTML;
         }
     }
 
-    /**
-     * Nettoie un montant (string ou float) en float propre.
-     * Ex: "1 200,50" -> 1200.50
-     */
     private function parseAmount(mixed $val): float
     {
         if (is_float($val) || is_int($val)) {
@@ -407,17 +495,12 @@ HTML;
         if (empty($val) || !is_string($val)) {
             return 0.0;
         }
-        // Remplacer virgule par point, supprimer les espaces insécables ou normaux
         $clean = str_replace([',', ' ', "\xc2\xa0"], ['.', '', ''], $val);
         return (float)$clean;
     }
 
-    // --- (Garder tes fonctions computePercentages, buildDonutSvg ici telles quelles) ---
-    // Je ne les remets pas pour ne pas surcharger la réponse, mais elles sont nécessaires.
-    
     private function computePercentages(array $segments): array
     {
-        // Copier/coller ton code existant
         $total = 0.0;
         foreach ($segments as $s) $total += max(0.0, (float) ($s['value'] ?? 0.0));
         if ($total <= 0.0) {
@@ -430,10 +513,6 @@ HTML;
 
     private function buildDonutSvg(array $segments): string
     {
-        // Copier/coller ton code existant
-        // ... (Le code SVG du fichier original)
-        // Juste pour rappel, le code original est parfait.
-        
         $width = 190; $height = 190; $cx = 95; $cy = 95; $radius = 70; $strokeWidth = 26;
         $circumference = 2 * M_PI * $radius;
         $circles = ''; $currentOffset = 0.0;
@@ -455,48 +534,123 @@ HTML;
 SVG;
     }
 
-    // Helper pour sortir le gros bloc CSS du renderHtml
-    private function getCssDefinition($headerGreyBg, $headerGrey, $blueCartouche, $greenMain, $greenLight, $borderGrey, $lightGrey, $darkText, $greyText, $rowBlue): string
+    private function getCssDefinition($headerDarkBg, $greenMain, $greenLight, $borderGrey, $lightGrey, $darkText, $greyText, $rowBlue): string
     {
-        // Tu peux coller ton CSS original ici pour alléger renderHtml
+        $sectionTitleBg = '#BCEED7';
+
         return <<<CSS
-            body { font-family: Calibri, Arial, sans-serif; font-size: 9pt; color: #000000; }
+            @page {
+                header: html_mainHeader;
+                margin-header: 5px;
+                margin-bottom: 20px;
+            }
+            body { font-family: Calibri, Arial, sans-serif; font-size: 10pt; color: #000000; }
             .page { width: 100%; box-sizing: border-box; }
-            .header-table { width: 100%; border-collapse: collapse; margin-bottom: 4px; }
-            .header-table td { padding: 4px 6px; font-size: 9pt; }
-            .header-left { background-color: {$headerGreyBg}; color: {$headerGrey}; font-weight: 700; }
-            .header-left-sub { font-size: 7pt; font-weight: 400; }
-            .header-right { background-color: {$blueCartouche}; color: #FFFFFF; text-align: center; font-weight: 700; font-size: 9pt; }
-            .identity-table { width: 100%; border-collapse: collapse; margin-bottom: 3px; }
-            .identity-name-row td { background-color: {$greenMain}; color: #FFFFFF; font-size: 13pt; font-weight: 700; text-align: center; padding: 4px 6px; }
-            .identity-poste-row td { background-color: #FFFFFF; color: {$darkText}; font-size: 10pt; font-weight: 500; text-align: center; padding: 3px 6px; border: 1px solid {$greenMain}; }
-            .info-line-table { width: 100%; border-collapse: collapse; margin-bottom: 6px; }
-            .info-line-table td { border: 1px solid {$borderGrey}; padding: 4px 6px; }
-            .info-label { font-size: 8pt; color: {$greyText}; }
-            .info-value { font-size: 9pt; font-weight: 700; color: #000000; }
-            .section-title { width: 100%; background-color: {$greenLight}; color: #006100; font-weight: 700; font-size: 9.5pt; text-transform: uppercase; padding: 3px 6px; margin-top: 4px; border-top: 1px solid #8FBF8F; border-bottom: 1px solid #8FBF8F; }
-            .remu-section { width: 100%; margin-top: 2px; margin-bottom: 6px; }
+            
+            .mt-50 { margin-top: 25px !important; }
+
+            /* HEADER */
+            .header-table { width: 100%; border-collapse: collapse; margin-bottom: 2px; }
+            .header-table td { padding: 6px 6px; font-size: 10pt; vertical-align: middle; }
+            .header-left { background-color: {$headerDarkBg}; color: #FFFFFF; font-weight: 700; }
+            .header-right { background-color: {$headerDarkBg}; color: #FFFFFF; text-align: center; font-weight: 700; font-size: 10pt; }
+            
+            /* IDENTITÉ */
+            .identity-table { width: 100%; border-collapse: collapse; margin-bottom: 10px; margin-top: 5px; }
+            .identity-name-row td { 
+                background-color: #FFFFFF; 
+                color: {$greenMain}; 
+                font-size: 18pt; 
+                font-weight: 700; 
+                text-align: center; 
+                padding: 6px; 
+                text-transform: uppercase;
+                border: none;
+            }
+            .identity-poste-row td { 
+                background-color: #FFFFFF; 
+                color: {$greenMain}; 
+                font-size: 14pt; 
+                font-weight: 700; 
+                text-align: center; 
+                padding: 4px; 
+                border: none;
+            }
+
+            .info-line-table { width: 100%; border-collapse: collapse; margin-bottom: 5px; }
+            /* PADDING REDUIT ICI POUR GAGNER DE LA HAUTEUR */
+            .info-line-table td { border: 1px solid {$borderGrey}; padding: 3px 6px; vertical-align: middle; }
+            .info-label { font-size: 9pt; color: {$greyText}; }
+            .info-value { font-size: 10pt; font-weight: 700; color: #000000; }
+            
+            /* TITRES SECTIONS */
+            .section-title { 
+                width: 100%; 
+                background-color: {$sectionTitleBg}; 
+                color: {$headerDarkBg}; 
+                font-weight: 800; 
+                font-size: 12pt; 
+                text-transform: uppercase; 
+                padding: 4px 8px; 
+                margin-top: 10px; 
+                margin-bottom: 4px;
+                border: none;
+            }
+
+            .section-title-spaced {
+                width: 100%; 
+                background-color: {$sectionTitleBg}; 
+                color: {$headerDarkBg}; 
+                font-weight: 800; 
+                font-size: 12pt; 
+                text-transform: uppercase; 
+                padding: 4px 8px; 
+                margin-top: 15px; /* Espacement réduit pour tenir sur 1 page */
+                margin-bottom: 4px;
+                border: none;
+            }
+            
+            .remu-section { width: 100%; margin-top: 2px; margin-bottom: 5px; }
             .remu-overview-table { width: 100%; border-collapse: collapse; }
-            .remu-overview-left .top-label { font-size: 8pt; color: {$greyText}; }
-            .remu-overview-left .top-amount { font-size: 13pt; font-weight: 700; }
-            .remu-overview-left .top-subtitle { font-size: 10pt; font-weight: 700; }
-            .remu-overview-right { font-size: 8pt; }
-            .remu-overview-right .amount { font-size: 11pt; font-weight: 700; }
-            .remu-details-layout { width: 100%; border-collapse: collapse; margin-top: 6px; }
-            .remu-detail-table { width: 100%; font-size: 8pt; }
+            .remu-overview-left .top-label { font-size: 9pt; color: {$greyText}; }
+            .remu-overview-left .top-amount { font-size: 16pt; font-weight: 700; }
+            .remu-overview-left .top-subtitle { font-size: 11pt; font-weight: 700; }
+            .remu-overview-right { font-size: 9pt; }
+            .remu-overview-right .amount { font-size: 12pt; font-weight: 700; }
+            
+            .remu-details-layout { width: 100%; border-collapse: collapse; margin-top: 5px; }
+            .remu-detail-table { width: 100%; font-size: 9pt; }
             .remu-detail-amount { text-align: right; }
-            .remu-highlight-table { width: 100%; margin-top: 6px; font-size: 8pt; background-color: {$rowBlue}; }
+            
+            .remu-highlight-table { width: 100%; margin-top: 5px; font-size: 9pt; background-color: {$rowBlue}; }
             .remu-highlight-amount { text-align: right; font-weight: 700; }
+            
             .donut-wrapper { text-align: center; display: flex; flex-direction: column; align-items: center; }
-            .social-table { width: 100%; border-collapse: collapse; font-size: 8pt; margin-top: 2px; }
+            
+            /* TABLEAU AVANTAGES */
+            .social-extra { width: 100%; border-collapse: collapse; margin-bottom: 5px; margin-top: 5px; text-align: center; }
+            .social-extra td { padding: 3px; vertical-align: top; }
+            .social-extra-amount { font-size: 16pt; font-weight: 700; color: #000000; }
+            .social-extra-label { font-size: 9pt; color: {$greyText}; }
+            .social-extra-small { font-size: 8pt; color: {$greyText}; font-style: italic; }
+
+            /* SOCIAL TABLE: PADDING COMPACT */
+            .social-table { width: 100%; border-collapse: collapse; font-size: 8.5pt; margin-top: 2px; }
             .social-table td, .social-table th { border: 1px solid {$borderGrey}; padding: 3px 4px; }
             .social-table thead th { border-bottom: 2px solid {$greenMain}; text-align: center; }
             .social-table tfoot td { background-color: {$greenLight}; font-weight: 700; }
-            .power-table { width: 100%; border-collapse: collapse; font-size: 8pt; margin-top: 2px; }
-            .power-table td, .power-table th { border: 1px solid {$borderGrey}; padding: 3px 4px; }
-            .power-table thead tr { background-color: {$lightGrey}; font-weight: 700; }
-            .note-text { font-size: 7pt; color: {$greyText}; margin-top: 3px; }
-            .footer { margin-top: 5px; font-size: 7pt; color: {$greyText}; text-align: right; }
+            
+            /* BOITE POUVOIR D'ACHAT */
+            .power-box { 
+                width: 100%; 
+                background-color: #F2F2F2; 
+                border: 1px solid #A6A6A6; 
+                padding: 10px 0; 
+                margin-top: 3px; 
+            }
+            
+            .note-text { font-size: 8pt; color: {$greyText}; margin-top: 2px; }
+            .footer { margin-top: 5px; font-size: 8pt; color: {$greyText}; text-align: right; }
 CSS;
     }
 }
