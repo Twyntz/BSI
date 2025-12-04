@@ -9,156 +9,109 @@ use PhpOffice\PhpSpreadsheet\IOFactory;
 
 class CsvEmployeeReader
 {
-    /** @var string[] */
     private array $persons = [];
-
-    /** @var string[] */
     private array $officialNames = [];
-
-    /** @var array<string,mixed> */
     private array $data = [];
 
-    /** @var string[] */
-    private array $retraite = [
-        "Vieillesse déplafonnée",
-        "Vieillesse plafonnée",
-        "Retraite TU1",
-        "Contribution d'Equilibre Général TU1",
-        "Réduct. générale des cotisat. pat. retraite",
+    // --- CONFIGURATION ---
+    private array $descriptionMapping = [
+        'poste'        => ['INTITULEDEPOSTE'], 
+        'date_arrivee' => ['DEBUTDECONTRAT'],
+        'anciennete'   => ['DATEDANCIENNETE', 'DATEANCIENNETE'],
+        'type_contrat' => ['MODELEDECONTRAT']
     ];
 
-    /** @var string[] */
-    private array $maladie = [
-        "Maladie - maternité - invalidité - décès",
+    private string $joursColumnKeyword = 'NOMBREDEJOURSTRAVAILLESTHEORIQUE';
+
+    private array $listLibelleMoney = [
+        "Salaire de base", "Salaire Brut", "Sous-total Primes", "INTERESSEMENT",
+        "Net imposable", "Acomptes", "Frais de transport personnel non soumis",
+        "Heures mensuelles majorées"
     ];
 
-    /** @var string[] */
-    private array $chomage = [
-        "Assurance chômage TrA+TrB",
-        "AGS",
+    private array $categories = [
+        'retraite'   => ["Vieillesse déplafonnée", "Vieillesse plafonnée", "Retraite TU1", "Contribution d'Equilibre Général TU1", "Réduct. générale des cotisat. pat. retraite", "retraite"],
+        'maladie'    => ["Maladie - maternité - invalidité - décès", "maladie"],
+        'chomage'    => ["Assurance chômage TrA+TrB", "AGS", "chomage"],
+        'prevoyance' => ["Prévoyance supplémentaire non cadre TrA", "prevoyance"],
+        'mutuelle'   => ["Frais de santé", "mutuelle"],
     ];
 
-    /** @var string[] */
-    private array $prevoyance = [
-        "Prévoyance supplémentaire non cadre TrA",
-    ];
+    private array $forfaitJoursKeywords = ["RTT pris (j)", "RTT acquis (j)", "RTT et autres repos"];
+    private array $descriptionFields = ["nom", "prenom", "poste", "anciennete", "date_arrivee", "type_contrat"];
 
-    /** @var string[] */
-    private array $mutuelle = [
-        "Frais de santé",
-    ];
+    // --- METHODE PRINCIPALE ---
 
-    /** @var string[] */
-    private array $descriptionFields = [
-        "nom",
-        "prenom",
-        "poste",
-        "anciennete",
-        "date_arrivee",
-        "type_contrat",
-    ];
-
-    /** @var string[] */
-    private array $listLibelleMoney = [];
-
-    /** @var string[] */
-    private array $forfaitJoursKeywords = [
-        "RTT pris (j)",
-        "RTT acquis (j)",
-        "RTT et autres repos",
-    ];
-
-    public function __construct()
+    public function readAll(string $bsiMoneyPath, string $bsiJoursPath, array $descriptionPaths): array
     {
-        $this->listLibelleMoney = array_merge(
-            [
-                "Salaire de base",
-                "Salaire Brut",
-                "Sous-total Primes",
-                "INTERESSEMENT",
-                "Net imposable",
-                "Acomptes",
-                "Frais de transport personnel non soumis",
-                "prevoyance",
-                "mutuelle",
-                "chomage",
-                "maladie",
-                "retraite",
-                "Heures mensuelles majorées",
-            ],
-            $this->retraite,
-            $this->maladie,
-            $this->chomage,
-            $this->mutuelle,
-            $this->prevoyance,
-        );
-    }
-
-    public function readAll(
-        string $bsiMoneyPath,
-        string $bsiJoursPath,
-        array $descriptionPaths
-    ): array {
         $this->data = [];
         $this->persons = [];
         $this->officialNames = [];
+        
+        $diagFile = dirname(__DIR__, 3) . '/public/RESULT/diagnostic.txt';
+        $this->logDiag($diagFile, "=== DÉBUT DIAGNOSTIC (V3 - Math Date Fix) ===", true);
 
-        // 1. Lecture du BSI Money
+        // 1. Money
         $moneyRows = $this->readTableFile($bsiMoneyPath);
-        if (count($moneyRows) === 0) return [];
-
+        if (empty($moneyRows)) return [];
         $this->extractNameBsiMoney($moneyRows);
         $this->createLibelle();
         $this->extractValueBsiMoney($moneyRows);
 
-        // 2. Lecture du BSI Jours
+        // 2. Jours
         $joursRows = $this->readTableFile($bsiJoursPath);
-        if (count($joursRows) > 0) {
-            $this->extractValueJoursBsi($joursRows);
-        }
+        if (count($joursRows) > 0) $this->extractValueJoursBsi($joursRows, $diagFile);
 
-        // 3. Lecture des descriptions collaborateurs (plusieurs fichiers)
+        // 3. Descriptions
         foreach ($descriptionPaths as $path) {
             $descRows = $this->readTableFile($path);
-            if (count($descRows) === 0) continue;
-            $this->extractValueBsiDescription($descRows);
+            if (!empty($descRows)) $this->extractValueBsiDescription($descRows, $diagFile);
         }
 
-        // 4. Agrégation des montants
+        // 4. Agrégation & Conversion Dates
         $this->sumBsiMoney();
+        $this->formatDatesForDisplay(); 
 
         return $this->data;
     }
 
-    // ---------------------------------------------------------------------
-    // Utils : lecture CSV ou XLSX
-    // ---------------------------------------------------------------------
+    // --- CONVERSION DATES EXCEL (MÉTHODE MATHÉMATIQUE) ---
+    private function formatDatesForDisplay(): void
+    {
+        foreach ($this->data as $person => &$info) {
+            foreach (['anciennete', 'date_arrivee'] as $field) {
+                // Si on a un nombre > 20000 (environ année 1954)
+                if (isset($info[$field]) && is_numeric($info[$field]) && $info[$field] > 20000) {
+                    // Formule : (ExcelSerial - 25569) * 86400 = Timestamp Unix
+                    // 25569 est le nombre de jours entre le 01/01/1900 (Excel) et le 01/01/1970 (Unix)
+                    $unixDate = ($info[$field] - 25569) * 86400;
+                    
+                    // On utilise gmdate pour éviter les décalages de fuseau horaire (GMT)
+                    $info[$field] = gmdate("d/m/Y", (int)$unixDate);
+                }
+            }
+        }
+    }
+
+    // --- LECTURE ---
 
     private function readTableFile(string $path): array
     {
         if (!is_file($path)) throw new \RuntimeException("Fichier introuvable : {$path}");
         $ext = strtolower(pathinfo($path, PATHINFO_EXTENSION));
-
-        if ($ext === 'csv') return $this->readCsvFile($path);
-        return $this->readExcelFile($path);
+        return ($ext === 'csv') ? $this->readCsvFile($path) : $this->readExcelFile($path);
     }
 
     private function readCsvFile(string $path): array
     {
         $rows = [];
         $handle = fopen($path, 'r');
-        if ($handle === false) throw new \RuntimeException("Impossible d'ouvrir le fichier CSV : {$path}");
-
-        // Détection séparateur
         $firstLine = fgets($handle);
         rewind($handle);
         $separator = (str_contains($firstLine, ';')) ? ';' : ',';
 
         while (($row = fgetcsv($handle, 0, $separator)) !== false) {
-            // Nettoyage de l'encodage pour chaque cellule
-            $rows[] = array_map(function($v) {
-                return $v === null ? '' : mb_convert_encoding((string)$v, 'UTF-8', 'auto');
-            }, $row);
+            $rows[] = array_map(fn($v) => $v === null ? '' : mb_convert_encoding((string)$v, 'UTF-8', 'Windows-1252'), $row);
         }
         fclose($handle);
         return $rows;
@@ -167,24 +120,17 @@ class CsvEmployeeReader
     private function readExcelFile(string $path): array
     {
         $spreadsheet = IOFactory::load($path);
-        $sheet = $spreadsheet->getActiveSheet();
+        // On force string pour éviter les problèmes de null
+        $rawRows = $spreadsheet->getActiveSheet()->toArray(null, false, false, false);
         $rows = [];
-        foreach ($sheet->getRowIterator() as $row) {
-            $cellIterator = $row->getCellIterator();
-            $cellIterator->setIterateOnlyExistingCells(false);
-            $rowData = [];
-            foreach ($cellIterator as $cell) {
-                $value = $cell->getValue();
-                $rowData[] = $value === null ? '' : (string)$value;
-            }
-            $rows[] = $rowData;
+        foreach ($rawRows as $row) {
+            $rows[] = array_map(fn($cell) => (string)$cell, $row);
         }
         return $rows;
     }
 
-    /**
-     * Normalisation stricte : MAJUSCULES, sans accents, lettres uniquement.
-     */
+    // --- UTILS CLEANING ---
+
     private function normaliserChaine(string $chaine): string
     {
         $str = iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $chaine);
@@ -193,31 +139,22 @@ class CsvEmployeeReader
         return strtoupper(trim($str));
     }
 
-    /**
-     * Détecte dynamiquement les index des colonnes "Nom" et "Prénom" dans l'entête
-     */
-    private function findNameIndexes(array $headerRow, int $defaultNom = 0, int $defaultPrenom = 1): array
+    private function cleanHeader(string $h): string
     {
-        $nomIdx = $defaultNom;
-        $prenomIdx = $defaultPrenom;
-
-        foreach ($headerRow as $index => $col) {
-            $colClean = $this->normaliserChaine($col);
-            if ($colClean === 'NOM') $nomIdx = $index;
-            if (in_array($colClean, ['PRENOM', 'PRENOMS'])) $prenomIdx = $index;
-        }
-
-        return ['nom' => $nomIdx, 'prenom' => $prenomIdx];
+        return str_replace(' ', '', $this->normaliserChaine($h));
     }
 
-    // ---------------------------------------------------------------------
-    // MONEY BSI
-    // ---------------------------------------------------------------------
+    private function logDiag(string $path, string $msg, bool $reset = false): void
+    {
+        file_put_contents($path, $msg . "\n", $reset ? 0 : FILE_APPEND);
+    }
+
+    // --- MONEY ---
 
     private function extractNameBsiMoney(array $rows): void
     {
         if (count($rows) < 3) return;
-        $headerRow = $rows[2]; // Ligne 3
+        $headerRow = $rows[2];
         $this->persons = [];
         $this->officialNames = [];
 
@@ -232,270 +169,172 @@ class CsvEmployeeReader
     private function createLibelle(): void
     {
         foreach ($this->persons as $index => $person) {
-            $officialName = $this->officialNames[$index] ?? $person;
             $this->data[$person] = [];
-            $this->data[$person]['official_name'] = $officialName;
-
-            foreach ($this->listLibelleMoney as $libelle) {
-                $this->data[$person][$libelle] = ['salarial' => 0, 'patronal' => 0];
-            }
-            foreach ($this->descriptionFields as $field) {
-                $this->data[$person][$field] = 'no data';
-            }
+            $this->data[$person]['official_name'] = $this->officialNames[$index] ?? $person;
             $this->data[$person]['forfait_jours'] = false;
+            foreach ($this->listLibelleMoney as $l) $this->data[$person][$l] = ['salarial' => 0, 'patronal' => 0];
+            foreach ($this->categories as $cat) foreach ($cat as $l) $this->data[$person][$l] = ['salarial' => 0, 'patronal' => 0];
+            foreach ($this->descriptionFields as $f) $this->data[$person][$f] = 'no data';
         }
-    }
-
-    private function findHeaderBsiMoney(array $rows): array
-    {
-        $codeIndex = 0; 
-        $libelleIndex = 0; 
-        $startValueIndex = 0;
-
-        foreach ($rows as $row) {
-            foreach ($row as $idx => $col) {
-                $colNorm = $this->normaliserChaine($col); // Ex: "BASE S" ou "LIBELLE"
-
-                if (str_contains($colNorm, 'CODE')) $codeIndex = $idx;
-                if (str_contains($colNorm, 'LIBELLE')) $libelleIndex = $idx;
-
-                // CORRECTION ICI : On supprime les espaces pour être sûr de trouver "BASES"
-                // Cela permet de matcher "Base S.", "Base S", "Base Sécu", etc.
-                $colNormNoSpace = str_replace(' ', '', $colNorm); 
-
-                if (str_contains($colNormNoSpace, 'BASES')) {
-                    $startValueIndex = $idx;
-                    return [
-                        'codeIndex'       => $codeIndex,
-                        'libelleIndex'    => $libelleIndex,
-                        'startValueIndex' => $startValueIndex
-                    ];
-                }
-            }
-        }
-
-        // Si on arrive ici, c'est qu'on a échoué. On affiche les headers pour aider au debug.
-        // On prend la ligne 4 (index 3) car c'est souvent là que sont les titres
-        $headersTrouves = isset($rows[3]) ? implode(' | ', $rows[3]) : 'Ligne introuvable';
-        
-        throw new \RuntimeException("Impossible de trouver les colonnes 'Code', 'Libellé' et 'Base S.' dans BSI Money. Headers lus sur la ligne probable : " . $headersTrouves);
     }
 
     private function extractValueBsiMoney(array $rows): void
     {
-        if (empty($rows) || empty($this->persons)) return;
+        $codeIdx = -1; $libIdx = -1; $baseIdx = -1;
+        foreach ($rows as $r) {
+            foreach ($r as $idx => $val) {
+                $clean = $this->cleanHeader($val);
+                if (str_contains($clean, 'CODE')) $codeIdx = $idx;
+                if (str_contains($clean, 'LIBELLE')) $libIdx = $idx;
+                if (str_contains($clean, 'BASES')) $baseIdx = $idx;
+            }
+            if ($codeIdx >= 0 && $libIdx >= 0 && $baseIdx >= 0) break;
+        }
 
-        $headerIndexes = $this->findHeaderBsiMoney($rows);
-        $libelleIndex = $headerIndexes['libelleIndex'];
-        $startValueIndex = $headerIndexes['startValueIndex'];
+        if ($baseIdx === -1) return;
 
         foreach ($rows as $row) {
-            if (count($row) <= $libelleIndex) continue;
-
-            $libelle = trim($row[$libelleIndex]); 
-            $tempStartIndex = $startValueIndex;
-
+            if (!isset($row[$libIdx])) continue;
+            $libelle = trim($row[$libIdx]);
+            $currentBaseIdx = $baseIdx;
+            
             foreach ($this->persons as $person) {
-                $baseIndex = $tempStartIndex;
-                $salarialIndex = $tempStartIndex + 1;
-                $patronalIndex = $tempStartIndex + 2;
+                if (!isset($this->data[$person])) continue;
+                $salarial = $row[$currentBaseIdx + 1] ?? '';
+                $patronal = $row[$currentBaseIdx + 2] ?? '';
+                $baseS    = $row[$currentBaseIdx] ?? '';
 
-                if (!array_key_exists($person, $this->data)) {
-                    $this->data[$person] = [];
+                if (in_array($libelle, $this->forfaitJoursKeywords)) {
+                    if (trim($salarial . $patronal . $baseS) !== '') $this->data[$person]['forfait_jours'] = true;
                 }
-
-                $baseS = $row[$baseIndex] ?? '';
-                $salarial = $row[$salarialIndex] ?? '';
-                $patronal = $row[$patronalIndex] ?? '';
-
-                if (in_array($libelle, $this->forfaitJoursKeywords, true)) {
-                    $hasValue = (trim($baseS) !== '' || trim($salarial) !== '' || trim($patronal) !== '');
-                    if ($hasValue) $this->data[$person]['forfait_jours'] = true;
-                }
-
-                $this->getDataBsiMoney($person, $libelle, $baseS, $salarial, $patronal);
-                $tempStartIndex += 3;
+                $this->storeMoney($person, $libelle, $salarial, $patronal);
+                $currentBaseIdx += 3;
             }
         }
     }
 
-    private function getDataBsiMoney(string $person, string $libelle, string $baseS, string $salarial, string $patronal): void
+    private function storeMoney($person, $libelle, $salarial, $patronal): void
     {
-        if (!in_array($libelle, $this->listLibelleMoney, true)) return;
-        if (!isset($this->data[$person][$libelle])) {
-            $this->data[$person][$libelle] = ['salarial' => 0, 'patronal' => 0];
-        }
-        $clean = fn($v) => ($v === '') ? '0' : str_replace([' ', "\xc2\xa0"], '', $v);
-        $this->data[$person][$libelle]['salarial'] = $clean($salarial);
-        $this->data[$person][$libelle]['patronal'] = $clean($patronal);
-    }
-
-    // ---------------------------------------------------------------------
-    // JOURS BSI (Auto-détection colonnes + Matching souple)
-    // ---------------------------------------------------------------------
-
-    private function extractValueJoursBsi(array $rows): void
-    {
-        if (empty($rows)) return;
-
-        // Détection des colonnes sur la 1ère ligne
-        // Par défaut 2 et 3 si pas trouvé (cas classique export Stats)
-        $indexes = $this->findNameIndexes($rows[0], 2, 3);
-        $nomIdx = $indexes['nom'];
-        $prenomIdx = $indexes['prenom'];
-
-        // On cherche une colonne valeur (souvent index 6 ou contient "JOURS"/"TOTAL")
-        // Par défaut 6 (Colonne G)
-        $valueIdx = 6; 
-
-        foreach ($rows as $i => $row) {
-            // On saute la ligne d'entête si elle contient "Nom"
-            if ($i === 0 && $this->normaliserChaine($row[$nomIdx] ?? '') === 'NOM') continue;
-
-            if (!isset($row[$nomIdx], $row[$prenomIdx])) continue;
-
-            $nom = $this->normaliserChaine($row[$nomIdx]);
-            $prenom = $this->normaliserChaine($row[$prenomIdx]);
-
-            if ($nom === '' || $prenom === '') continue;
-
-            $this->matchAndAssignJours($nom, $prenom, $row[$valueIdx] ?? '0');
-        }
-    }
-
-    private function matchAndAssignJours(string $nom, string $prenom, string $valeur): void
-    {
-        foreach ($this->persons as $person) {
-            $nomMatch = str_contains($person, $nom);
-            // Matching: Prénom complet OU initiale
-            $prenomMatch = str_contains($person, $prenom);
-            $initiale = mb_substr($prenom, 0, 1);
-            $initialeMatch = str_contains($person, $nom . ' ' . $initiale);
-
-            if ($nomMatch && ($prenomMatch || $initialeMatch)) {
-                $realWorkingDayCount = str_replace(',', '.', $valeur);
-
-                if (!isset($this->data[$person]['nb jours travaillés']) || $this->data[$person]['nb jours travaillés'] === 'no data') {
-                     $this->data[$person]['nb jours travaillés'] = $realWorkingDayCount;
-                } else {
-                    $current = (float)$this->data[$person]['nb jours travaillés'];
-                    $final = $current + (float)$realWorkingDayCount;
-                    $this->data[$person]['nb jours travaillés'] = (string)$final;
-                }
-                break;
-            }
-        }
-    }
-
-    // ---------------------------------------------------------------------
-    // DESCRIPTIONS BSI (Auto-détection colonnes + Matching souple)
-    // ---------------------------------------------------------------------
-
-    private function extractValueBsiDescription(array $rows): void
-    {
-        if (empty($rows)) return;
-
-        // Détection des colonnes Nom/Prénom sur la 1ère ligne
-        // Si échoue, fallback sur 0 et 1, MAIS vos fichiers semblent être 2 et 3 (Matricule/Civilité avant)
-        // Donc on tente de trouver "Nom", sinon on suppose 2 et 3 si c'est un format export RH standard
-        $indexes = $this->findNameIndexes($rows[0], 0, 1);
-        $nomIdx = $indexes['nom'];
-        $prenomIdx = $indexes['prenom'];
-
-        // Identification des autres colonnes par nom d'entête
-        $header = array_map([$this, 'normaliserChaine'], $rows[0]);
-        $mapFields = [];
-        // Mapping nom technique -> libellé entête approximatif
-        $search = [
-            'poste' => 'POSTE', 
-            'anciennete' => 'ANCIENNETE', 
-            'date_arrivee' => ['DATE', 'ARRIVEE'], // Contient DATE ou ARRIVEE
-            'type_contrat' => ['CONTRAT', 'TYPE']
-        ];
-
-        foreach ($this->descriptionFields as $field) {
-            if ($field === 'nom' || $field === 'prenom') continue;
-            foreach ($header as $idx => $h) {
-                $terms = $search[$field] ?? strtoupper($field);
-                if (is_array($terms)) {
-                    foreach($terms as $t) if (str_contains($h, $t)) { $mapFields[$field] = $idx; break; }
-                } else {
-                    if (str_contains($h, $terms)) $mapFields[$field] = $idx;
-                }
-            }
-        }
-
-        foreach ($rows as $i => $row) {
-            // Skip header
-            if ($i === 0) continue;
-
-            $nom = $this->normaliserChaine($row[$nomIdx] ?? '');
-            $prenom = $this->normaliserChaine($row[$prenomIdx] ?? '');
-
-            if ($nom === '' || $prenom === '') continue;
-
-            foreach ($this->persons as $person) {
-                $nomMatch = str_contains($person, $nom);
-                $prenomMatch = str_contains($person, $prenom);
-                $initiale = mb_substr($prenom, 0, 1);
-                $initialeMatch = str_contains($person, $nom . ' ' . $initiale);
-
-                if ($nomMatch && ($prenomMatch || $initialeMatch)) {
-                    foreach ($this->descriptionFields as $field) {
-                        if ($field === 'nom' || $field === 'prenom') {
-                             // On met les beaux noms (Pas en majuscule, ceux du fichier)
-                             if (($this->data[$person][$field] ?? 'no data') === 'no data') {
-                                 $val = ($field === 'nom') ? ($row[$nomIdx]??'') : ($row[$prenomIdx]??'');
-                                 $this->data[$person][$field] = trim($val);
-                             }
-                             continue;
-                        }
-
-                        // Champs dynamiques ou fallback index fixe si pas trouvé
-                        $idx = $mapFields[$field] ?? -1;
-                        // Si on a pas trouvé la colonne dynamiquement, on fallback sur les index "classiques" 
-                        // Poste=2, Anciennete=3... (A adapter si besoin, mais le dynamique devrait marcher)
-                        
-                        if ($idx >= 0 && isset($row[$idx])) {
-                             if (($this->data[$person][$field] ?? 'no data') === 'no data') {
-                                 $this->data[$person][$field] = trim($row[$idx]);
-                             }
-                        }
-                    }
+        $target = $libelle;
+        $isKnown = in_array($libelle, $this->listLibelleMoney);
+        if (!$isKnown) {
+            foreach ($this->categories as $catName => $items) {
+                if (in_array($libelle, $items)) {
+                    $target = $libelle;
+                    $isKnown = true;
                     break;
                 }
             }
         }
+        if ($isKnown) {
+            if (!isset($this->data[$person][$target])) $this->data[$person][$target] = ['salarial' => 0, 'patronal' => 0];
+            $clean = fn($v) => (float)str_replace([',', ' '], ['.', ''], (string)$v);
+            $this->data[$person][$target]['salarial'] = $clean($salarial);
+            $this->data[$person][$target]['patronal'] = $clean($patronal);
+        }
     }
 
-    // ---------------------------------------------------------------------
-    // AGRÉGATION
-    // ---------------------------------------------------------------------
+    // --- JOURS ---
+
+    private function extractValueJoursBsi(array $rows, string $diagFile): void
+    {
+        $nomIdx = -1; $prenomIdx = -1; $valIdx = -1;
+
+        for ($i = 0; $i < min(5, count($rows)); $i++) {
+            foreach ($rows[$i] as $idx => $val) {
+                $clean = $this->cleanHeader($val);
+                if ($clean === 'NOM') $nomIdx = $idx;
+                if (in_array($clean, ['PRENOM', 'PRENOMS'])) $prenomIdx = $idx;
+                if (str_contains($clean, $this->joursColumnKeyword)) $valIdx = $idx;
+            }
+            if ($nomIdx >= 0 && $prenomIdx >= 0 && $valIdx >= 0) break;
+        }
+
+        if ($valIdx === -1) {
+            $valIdx = 6; 
+        }
+
+        foreach ($rows as $row) {
+            $nom = $this->normaliserChaine($row[$nomIdx] ?? '');
+            $prenom = $this->normaliserChaine($row[$prenomIdx] ?? '');
+            if ($nom === '' || $prenom === '' || $nom === 'NOM') continue;
+
+            $this->matchPerson($nom, $prenom, function($p) use ($row, $valIdx) {
+                $val = str_replace(',', '.', $row[$valIdx] ?? '0');
+                $this->data[$p]['nb jours travaillés'] = $val;
+            });
+        }
+    }
+
+    // --- DESCRIPTION ---
+
+    private function extractValueBsiDescription(array $rows, string $diagFile): void
+    {
+        $header = $rows[0];
+        $mapping = [];
+        $nomIdx = -1; $prenomIdx = -1;
+
+        foreach ($header as $idx => $col) {
+            $clean = $this->cleanHeader($col);
+            if ($clean === 'NOM') $nomIdx = $idx;
+            if (in_array($clean, ['PRENOM', 'PRENOMS'])) $prenomIdx = $idx;
+
+            foreach ($this->descriptionMapping as $field => $keywords) {
+                foreach ($keywords as $kw) {
+                    if (str_contains($clean, $kw)) {
+                        $mapping[$field] = $idx;
+                        break;
+                    }
+                }
+            }
+        }
+        
+        if ($nomIdx === -1) return;
+
+        foreach ($rows as $i => $row) {
+            if ($i === 0) continue;
+            $nom = $this->normaliserChaine($row[$nomIdx] ?? '');
+            $prenom = $this->normaliserChaine($row[$prenomIdx] ?? '');
+            if ($nom === '' || $prenom === '') continue;
+
+            $this->matchPerson($nom, $prenom, function($p) use ($row, $mapping, $nomIdx, $prenomIdx) {
+                if ($this->data[$p]['nom'] === 'no data') $this->data[$p]['nom'] = trim($row[$nomIdx]);
+                if ($this->data[$p]['prenom'] === 'no data') $this->data[$p]['prenom'] = trim($row[$prenomIdx]);
+                foreach ($mapping as $field => $idx) {
+                     $val = trim($row[$idx] ?? '');
+                     if ($val !== '') $this->data[$p][$field] = $val;
+                }
+            });
+        }
+    }
+
+    private function matchPerson(string $nom, string $prenom, callable $onMatch): void
+    {
+        foreach ($this->persons as $person) {
+            $nomMatch = str_contains($person, $nom);
+            $prenomMatch = str_contains($person, $prenom);
+            $initiale = mb_substr($prenom, 0, 1);
+            $initialeMatch = str_contains($person, $nom . ' ' . $initiale);
+            if ($nomMatch && ($prenomMatch || $initialeMatch)) {
+                $onMatch($person);
+                break; 
+            }
+        }
+    }
 
     private function sumBsiMoney(): void
     {
-        foreach ($this->persons as $person) {
-            $retraiteP = 0.0; $maladieP = 0.0; $chomageP = 0.0; $mutuelleP = 0.0; $prevoyanceP = 0.0;
-            $retraiteS = 0.0; $maladieS = 0.0; $chomageS = 0.0; $mutuelleS = 0.0; $prevoyanceS = 0.0;
-
-            foreach ($this->data[$person] as $libelle => $value) {
-                if (!is_array($value) || !isset($value['patronal'], $value['salarial'])) continue;
-
-                $cleanVal = fn($v) => (float)str_replace([',', ' '], ['.', ''], (string)$v);
-                $patronal = $cleanVal($value['patronal']);
-                $salarial = $cleanVal($value['salarial']);
-
-                if (in_array($libelle, $this->retraite, true)) { $retraiteP += $patronal; $retraiteS += $salarial; }
-                if (in_array($libelle, $this->maladie, true)) { $maladieP += $patronal; $maladieS += $salarial; }
-                if (in_array($libelle, $this->chomage, true)) { $chomageP += $patronal; $chomageS += $salarial; }
-                if (in_array($libelle, $this->mutuelle, true)) { $mutuelleP += $patronal; $mutuelleS += $salarial; }
-                if (in_array($libelle, $this->prevoyance, true)) { $prevoyanceP += $patronal; $prevoyanceS += $salarial; }
+        foreach ($this->persons as $p) {
+            foreach ($this->categories as $cat => $keys) {
+                $totS = 0; $totP = 0;
+                foreach ($keys as $k) {
+                    if (isset($this->data[$p][$k])) {
+                        $totS += $this->data[$p][$k]['salarial'];
+                        $totP += $this->data[$p][$k]['patronal'];
+                    }
+                }
+                $this->data[$p][$cat] = ['salarial' => $totS, 'patronal' => $totP];
             }
-            $this->data[$person]['prevoyance'] = ['patronal' => $prevoyanceP, 'salarial' => $prevoyanceS];
-            $this->data[$person]['mutuelle'] = ['patronal' => $mutuelleP, 'salarial' => $mutuelleS];
-            $this->data[$person]['chomage'] = ['patronal' => $chomageP, 'salarial' => $chomageS];
-            $this->data[$person]['maladie'] = ['patronal' => $maladieP, 'salarial' => $maladieS];
-            $this->data[$person]['retraite'] = ['patronal' => $retraiteP, 'salarial' => $retraiteS];
         }
     }
 }
