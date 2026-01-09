@@ -83,23 +83,29 @@ class BsiPdfGenerator
             'is_test'          => false,
         ];
 
-        $salaireBase    = $parse($data['Salaire de base']['salarial'] ?? 0);
-        $heuresSupp     = $parse($data['Heures mensuelles majorées']['salarial'] ?? 0);
-        $primes         = $parse($data['Sous-total Primes']['salarial'] ?? 0);
-        $interessement  = $parse($data['INTERESSEMENT']['salarial'] ?? 0);
-        $acomptes       = $parse($data['Acomptes']['salarial'] ?? 0);
+        $salaireBase   = $parse($data['Salaire de base']['salarial'] ?? 0);
+        $heuresSupp    = $parse($data['Heures mensuelles majorées']['salarial'] ?? 0);
+        $primes        = $parse($data['Sous-total Primes']['salarial'] ?? 0);
+        $interessement = $parse($data['INTERESSEMENT']['salarial'] ?? 0);
+        $acomptes      = $parse($data['Acomptes']['salarial'] ?? 0);
+        
+        // --- MODIFICATION 1 : Récupération des RTT rachetés ---
+        // Cette clé 'rtt_rachetes' est fournie par le CsvEmployeeReader corrigé précédemment
+        $rttRachetes   = $parse($data['rtt_rachetes'] ?? 0);
 
-        $totalBrutAnnuel = $salaireBase + $heuresSupp + $primes + $interessement;
+        // Ajout des RTT au total brut annuel (important pour que le total affiché soit cohérent)
+        $totalBrutAnnuel = $salaireBase + $heuresSupp + $primes + $interessement + $rttRachetes;
 
         $remuneration = [
-            'base_annuelle'      => $salaireBase,
-            'heures_supp'        => $heuresSupp,
-            'prime_annuelle'     => $primes,
-            'interessement'      => $interessement,
-            'acomptes'           => $acomptes,
-            'total_brut_annuel'  => $totalBrutAnnuel,
-            'total_mensuel'      => $totalBrutAnnuel / 12,
-            'equiv_mois'         => ($salaireBase > 0) ? ($totalBrutAnnuel / ($salaireBase / 12)) : 0,
+            'base_annuelle'     => $salaireBase,
+            'heures_supp'       => $heuresSupp,
+            'rtt_rachetes'      => $rttRachetes, // Stockage de la valeur RTT
+            'prime_annuelle'    => $primes,
+            'interessement'     => $interessement,
+            'acomptes'          => $acomptes,
+            'total_brut_annuel' => $totalBrutAnnuel,
+            'total_mensuel'     => $totalBrutAnnuel / 12,
+            'equiv_mois'        => ($salaireBase > 0) ? ($totalBrutAnnuel / ($salaireBase / 12)) : 0,
         ];
 
         // --- AVANTAGES SOCIAUX ---
@@ -169,6 +175,7 @@ class BsiPdfGenerator
             'remuneration' => [
                 'base_annuelle'     => 0.0,
                 'heures_supp'       => 0.0,
+                'rtt_rachetes'      => 0.0, // Initialisation pour éviter les erreurs
                 'prime_annuelle'    => 0.0,
                 'interessement'     => 0.0,
                 'acomptes'          => 0.0,
@@ -249,7 +256,12 @@ class BsiPdfGenerator
 
         // LOGIQUE DYNAMIQUE : Libellé HS ou RTT
         $isForfaitJours = $dIdent['is_forfait_jours'] ?? false;
+        
+        // 1. Choix du label
         $labelHs = $isForfaitJours ? 'Jours RTT rachetés' : 'Heures supplémentaires';
+        
+        // 2. Choix du montant (CORRECTION ICI : On prend RTT si forfait jours, sinon HS)
+        $montantHsOuRtt = $isForfaitJours ? ($dRemu['rtt_rachetes'] ?? 0.0) : ($dRemu['heures_supp'] ?? 0.0);
 
         $colors = [
             'base'   => '#BCEED7',
@@ -260,7 +272,8 @@ class BsiPdfGenerator
 
         $remuBreakdown = [
             ['label' => 'Salaire de base annuel', 'color' => $colors['base'],  'value' => $dRemu['base_annuelle']],
-            ['label' => $labelHs,                 'color' => $colors['hs'],    'value' => $dRemu['heures_supp']],
+            // Utilisation de la variable dynamique pour la valeur aussi
+            ['label' => $labelHs,                 'color' => $colors['hs'],    'value' => $montantHsOuRtt],
             ['label' => 'Prime annuelle',         'color' => $colors['prime'], 'value' => $dRemu['prime_annuelle']],
             ['label' => "Prime d'intéressement",  'color' => $colors['inter'], 'value' => $dRemu['interessement']],
         ];
@@ -411,7 +424,9 @@ class BsiPdfGenerator
                 <td style="width: 55%;">
                     <table class="remu-detail-table">
                         <tr><td class="remu-detail-label">{$bullet($colors['base'])} Salaire de base annuel</td><td class="remu-detail-amount">{$fmt($dRemu['base_annuelle'])}</td></tr>
-                        <tr><td class="remu-detail-label">{$bullet($colors['hs'])} {$labelHs}</td><td class="remu-detail-amount">{$fmt($dRemu['heures_supp'])}</td></tr>
+                        
+                        <tr><td class="remu-detail-label">{$bullet($colors['hs'])} {$labelHs}</td><td class="remu-detail-amount">{$fmt($montantHsOuRtt)}</td></tr>
+                        
                         <tr><td class="remu-detail-label">{$bullet($colors['prime'])} Prime annuelle</td><td class="remu-detail-amount">{$fmt($dRemu['prime_annuelle'])}</td></tr>
                         <tr><td class="remu-detail-label">{$bullet($colors['inter'])} Prime d'intéressement</td><td class="remu-detail-amount">{$fmt($dRemu['interessement'])}</td></tr>
                     </table>

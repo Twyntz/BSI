@@ -26,7 +26,8 @@ class CsvEmployeeReader
     private array $listLibelleMoney = [
         "Salaire de base", "Salaire Brut", "Sous-total Primes", "INTERESSEMENT",
         "Net imposable", "Acomptes", "Frais de transport personnel non soumis",
-        "Heures mensuelles majorées"
+        "Heures mensuelles majorées",
+        "Indemnités Jours de repos 10%"
     ];
 
     private array $categories = [
@@ -49,7 +50,7 @@ class CsvEmployeeReader
         $this->officialNames = [];
 
         $diagFile = dirname(__DIR__, 3) . '/public/RESULT/diagnostic.txt';
-        $this->logDiag($diagFile, "=== DÉBUT DIAGNOSTIC (V4 - Fix Aggregation) ===", true);
+        $this->logDiag($diagFile, "=== DÉBUT DIAGNOSTIC (V6 - Fix Encoding & RTT) ===", true);
 
         // 1. Money
         $moneyRows = $this->readTableFile($bsiMoneyPath);
@@ -68,27 +69,24 @@ class CsvEmployeeReader
             if (!empty($descRows)) $this->extractValueBsiDescription($descRows, $diagFile);
         }
 
-        // 4. Agrégation & Conversion Dates
+        // 4. Agrégation & Nettoyage
         $this->sumBsiMoney();
         $this->formatDatesForDisplay();
 
         return $this->data;
     }
 
-    // --- CONVERSION DATES EXCEL ---
     private function formatDatesForDisplay(): void
     {
         foreach ($this->data as $person => &$info) {
             foreach (['anciennete', 'date_arrivee'] as $field) {
-                if (isset($info[$field]) && is_numeric($info[$field]) && $info[$field] > 20000) {
-                    $unixDate = ($info[$field] - 25569) * 86400;
+                if (isset($info[$field]) && is_numeric($info[$field]) && (float)$info[$field] > 20000) {
+                    $unixDate = ((float)$info[$field] - 25569) * 86400;
                     $info[$field] = gmdate("d/m/Y", (int)$unixDate);
                 }
             }
         }
     }
-
-    // --- LECTURE ---
 
     private function readTableFile(string $path): array
     {
@@ -97,19 +95,32 @@ class CsvEmployeeReader
         return ($ext === 'csv') ? $this->readCsvFile($path) : $this->readExcelFile($path);
     }
 
+    // --- CORRECTION MAJEURE ICI : GESTION DE L'ENCODAGE ---
     private function readCsvFile(string $path): array
     {
         $rows = [];
         $handle = fopen($path, 'r');
+        if (!$handle) return [];
+
         $firstLine = fgets($handle);
         rewind($handle);
-        $separator = (str_contains($firstLine, ';')) ? ';' : ',';
+        $separator = (str_contains((string)$firstLine, ';')) ? ';' : ',';
 
         while (($row = fgetcsv($handle, 0, $separator)) !== false) {
-            $rows[] = array_map(fn($v) => $v === null ? '' : mb_convert_encoding((string)$v, 'UTF-8', 'Windows-1252'), $row);
+            // Utilisation de la méthode convertToUtf8 pour éviter de casser les accents
+            $rows[] = array_map(fn($v) => $v === null ? '' : $this->convertToUtf8((string)$v), $row);
         }
         fclose($handle);
         return $rows;
+    }
+
+    private function convertToUtf8(string $str): string
+    {
+        // Si la chaîne est déjà en UTF-8 valide, on la garde telle quelle.
+        // Sinon, on tente une conversion depuis Windows-1252 (format Excel standard).
+        return mb_check_encoding($str, 'UTF-8') 
+            ? $str 
+            : mb_convert_encoding($str, 'UTF-8', 'Windows-1252');
     }
 
     private function readExcelFile(string $path): array
@@ -123,27 +134,16 @@ class CsvEmployeeReader
         return $rows;
     }
 
-    // --- UTILS CLEANING ---
-
-    /**
-     * Normalisation améliorée : on garde les chiffres (TU1 vs TU2) 
-     * et on traite les tirets comme des espaces pour matcher "Alsace-Moselle".
-     */
     private function normaliserChaine(string $chaine): string
     {
         $str = iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $chaine);
         if ($str === false) $str = $chaine;
-        
-        // On garde A-Z et 0-9. Tout le reste devient un espace.
         $str = preg_replace('/[^a-zA-Z0-9]+/', ' ', $str) ?? '';
-        
-        // Nettoyage des espaces multiples et mise en majuscule
         return strtoupper(trim(preg_replace('/\s+/', ' ', $str)));
     }
 
     private function cleanHeader(string $h): string
     {
-        // Pour les headers, on supprime TOUT espace pour un match strict (NOM, PRENOM, etc)
         return str_replace(' ', '', $this->normaliserChaine($h));
     }
 
@@ -151,12 +151,9 @@ class CsvEmployeeReader
     {
         $dir = dirname($path);
         if (!is_dir($dir)) @mkdir($dir, 0775, true);
-        if (!is_dir($dir)) return;
         $flags = $reset ? 0 : FILE_APPEND;
         @file_put_contents($path, $msg . "\n", $flags);
     }
-
-    // --- MONEY ---
 
     private function extractNameBsiMoney(array $rows): void
     {
@@ -179,6 +176,7 @@ class CsvEmployeeReader
             $this->data[$person] = [];
             $this->data[$person]['official_name'] = $this->officialNames[$index] ?? $person;
             $this->data[$person]['forfait_jours'] = false;
+            $this->data[$person]['rtt_rachetes'] = 0.0; 
 
             foreach ($this->listLibelleMoney as $l) {
                 $this->data[$person][$l] = ['salarial' => 0, 'patronal' => 0];
@@ -240,8 +238,16 @@ class CsvEmployeeReader
         if ($libelle === '') return;
 
         $libNorm = $this->normaliserChaine($libelle);
-        $isKnown = false;
+        $clean = fn($v) => (float) str_replace([',', ' '], ['.', ''], (string)$v);
 
+        // --- CORRECTION MAJEURE ICI : DETECTION ROBUSTE DES RTT ---
+        // On utilise str_contains pour éviter les problèmes d'accents sur "Indemnités"
+        // Le libellé complet est "Indemnités Jours de repos 10%"
+        if (str_contains($libNorm, 'JOURS DE REPOS 10')) {
+            $this->data[$person]['rtt_rachetes'] += $clean($salarial);
+        }
+
+        $isKnown = false;
         foreach ($this->listLibelleMoney as $known) {
             if ($libNorm === $this->normaliserChaine($known)) { $isKnown = true; break; }
         }
@@ -260,12 +266,30 @@ class CsvEmployeeReader
             $this->data[$person][$libelle] = ['salarial' => 0, 'patronal' => 0];
         }
 
-        $clean = fn($v) => (float) str_replace([',', ' '], ['.', ''], (string)$v);
         $this->data[$person][$libelle]['salarial'] += $clean($salarial);
         $this->data[$person][$libelle]['patronal'] += $clean($patronal);
     }
 
-    // --- JOURS ---
+    private function sumBsiMoney(): void
+    {
+        foreach ($this->persons as $p) {
+            foreach ($this->categories as $cat => $expectedLabels) {
+                $totS = 0.0;
+                $totP = 0.0;
+                $expectedNorms = array_map([$this, 'normaliserChaine'], $expectedLabels);
+
+                foreach ($this->data[$p] as $labelReel => $valeurs) {
+                    if (!is_array($valeurs) || !isset($valeurs['salarial'])) continue;
+                    $labelNorm = $this->normaliserChaine((string)$labelReel);
+                    if (in_array($labelNorm, $expectedNorms, true)) {
+                        $totS += (float)($valeurs['salarial'] ?? 0);
+                        $totP += (float)($valeurs['patronal'] ?? 0);
+                    }
+                }
+                $this->data[$p][$cat] = ['salarial' => $totS, 'patronal' => $totP];
+            }
+        }
+    }
 
     private function extractValueJoursBsi(array $rows, string $diagFile): void
     {
@@ -294,8 +318,6 @@ class CsvEmployeeReader
         }
     }
 
-    // --- DESCRIPTION ---
-
     private function extractValueBsiDescription(array $rows, string $diagFile): void
     {
         $header = $rows[0];
@@ -306,7 +328,6 @@ class CsvEmployeeReader
             $clean = $this->cleanHeader($col);
             if ($clean === 'NOM') $nomIdx = $idx;
             if (in_array($clean, ['PRENOM', 'PRENOMS'], true)) $prenomIdx = $idx;
-
             foreach ($this->descriptionMapping as $field => $keywords) {
                 foreach ($keywords as $kw) {
                     if (str_contains($clean, $kw)) { $mapping[$field] = $idx; break; }
@@ -344,36 +365,6 @@ class CsvEmployeeReader
             if ($nomMatch && ($prenomMatch || $initialeMatch)) {
                 $onMatch($person);
                 break;
-            }
-        }
-    }
-
-    /**
-     * Méthode corrigée : parcourt tous les libellés extraits et les
-     * additionne s'ils correspondent à la catégorie normalisée.
-     */
-    private function sumBsiMoney(): void
-    {
-        foreach ($this->persons as $p) {
-            foreach ($this->categories as $cat => $expectedLabels) {
-                $totS = 0.0;
-                $totP = 0.0;
-
-                // Pré-normalisation des libellés attendus pour cette catégorie
-                $expectedNorms = array_map([$this, 'normaliserChaine'], $expectedLabels);
-
-                foreach ($this->data[$p] as $labelReel => $valeurs) {
-                    if (!is_array($valeurs) || !isset($valeurs['salarial'])) continue;
-
-                    $labelNorm = $this->normaliserChaine((string)$labelReel);
-                    
-                    if (in_array($labelNorm, $expectedNorms, true)) {
-                        $totS += (float)($valeurs['salarial'] ?? 0);
-                        $totP += (float)($valeurs['patronal'] ?? 0);
-                    }
-                }
-
-                $this->data[$p][$cat] = ['salarial' => $totS, 'patronal' => $totP];
             }
         }
     }
