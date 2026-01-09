@@ -15,7 +15,7 @@ class CsvEmployeeReader
 
     // --- CONFIGURATION ---
     private array $descriptionMapping = [
-        'poste'        => ['INTITULEDEPOSTE'], 
+        'poste'        => ['INTITULEDEPOSTE'],
         'date_arrivee' => ['DEBUTDECONTRAT'],
         'anciennete'   => ['DATEDANCIENNETE', 'DATEANCIENNETE'],
         'type_contrat' => ['MODELEDECONTRAT']
@@ -30,14 +30,14 @@ class CsvEmployeeReader
     ];
 
     private array $categories = [
-        'retraite'   => ["Vieillesse déplafonnée", "Vieillesse plafonnée", "Retraite TU1", "Contribution d'Equilibre Général TU1", "Réduct. générale des cotisat. pat. retraite", "retraite"],
-        'maladie'    => ["Maladie - maternité - invalidité - décès", "maladie"],
-        'chomage'    => ["Assurance chômage TrA+TrB", "AGS", "chomage"],
-        'prevoyance' => ["Prévoyance supplémentaire non cadre TrA", "prevoyance"],
-        'mutuelle'   => ["Frais de santé", "mutuelle"],
+        'retraite'   => ["Vieillesse déplafonnée", "Vieillesse plafonnée", "Retraite TU1", "Contribution d'Equilibre Général TU1", "Réduct. générale des cotisat. pat. retraite", "Retraite TU2", "Contribution d'Equilibre Général TU2" ],
+        'maladie'    => ["Maladie - maternité - invalidité - décès", "Maladie supplémentaire Alsace - Moselle", "Maladie supplémentaire Alsace-Moselle"],
+        'chomage'    => ["Assurance chômage TrA+TrB", "AGS", "APEC TrA", "APEC TrB"],
+        'prevoyance' => ["Prévoyance non cadre TrA", "Prévoyance cadre TrA", "Prévoyance cadre TrB", "Prévoyance non cadre", "Prévoyance non cadre Tr1", "Prévoyance non cadre Tr2" ],
+        'mutuelle'   => ["Mutuelle Forfait Allan", "Frais de santé cadre forfait", "Frais de santé non cadre forfait direct", "Contat de santé forfait"],
     ];
 
-    private array $forfaitJoursKeywords = ["RTT pris (j)", "RTT acquis (j)", "RTT et autres repos"];
+    private array $forfaitJoursKeywords = ["RTT pris (j)", "RTT acquis (j)", "RTT et autres repos", "Indemnités Jours de repos 10%"];
     private array $descriptionFields = ["nom", "prenom", "poste", "anciennete", "date_arrivee", "type_contrat"];
 
     // --- METHODE PRINCIPALE ---
@@ -47,9 +47,9 @@ class CsvEmployeeReader
         $this->data = [];
         $this->persons = [];
         $this->officialNames = [];
-        
+
         $diagFile = dirname(__DIR__, 3) . '/public/RESULT/diagnostic.txt';
-        $this->logDiag($diagFile, "=== DÉBUT DIAGNOSTIC (V3 - Math Date Fix) ===", true);
+        $this->logDiag($diagFile, "=== DÉBUT DIAGNOSTIC (V4 - Fix Aggregation) ===", true);
 
         // 1. Money
         $moneyRows = $this->readTableFile($bsiMoneyPath);
@@ -70,23 +70,18 @@ class CsvEmployeeReader
 
         // 4. Agrégation & Conversion Dates
         $this->sumBsiMoney();
-        $this->formatDatesForDisplay(); 
+        $this->formatDatesForDisplay();
 
         return $this->data;
     }
 
-    // --- CONVERSION DATES EXCEL (MÉTHODE MATHÉMATIQUE) ---
+    // --- CONVERSION DATES EXCEL ---
     private function formatDatesForDisplay(): void
     {
         foreach ($this->data as $person => &$info) {
             foreach (['anciennete', 'date_arrivee'] as $field) {
-                // Si on a un nombre > 20000 (environ année 1954)
                 if (isset($info[$field]) && is_numeric($info[$field]) && $info[$field] > 20000) {
-                    // Formule : (ExcelSerial - 25569) * 86400 = Timestamp Unix
-                    // 25569 est le nombre de jours entre le 01/01/1900 (Excel) et le 01/01/1970 (Unix)
                     $unixDate = ($info[$field] - 25569) * 86400;
-                    
-                    // On utilise gmdate pour éviter les décalages de fuseau horaire (GMT)
                     $info[$field] = gmdate("d/m/Y", (int)$unixDate);
                 }
             }
@@ -120,7 +115,6 @@ class CsvEmployeeReader
     private function readExcelFile(string $path): array
     {
         $spreadsheet = IOFactory::load($path);
-        // On force string pour éviter les problèmes de null
         $rawRows = $spreadsheet->getActiveSheet()->toArray(null, false, false, false);
         $rows = [];
         foreach ($rawRows as $row) {
@@ -131,22 +125,35 @@ class CsvEmployeeReader
 
     // --- UTILS CLEANING ---
 
+    /**
+     * Normalisation améliorée : on garde les chiffres (TU1 vs TU2) 
+     * et on traite les tirets comme des espaces pour matcher "Alsace-Moselle".
+     */
     private function normaliserChaine(string $chaine): string
     {
         $str = iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $chaine);
         if ($str === false) $str = $chaine;
-        $str = preg_replace('/[^a-zA-Z ]+/', '', $str) ?? '';
-        return strtoupper(trim($str));
+        
+        // On garde A-Z et 0-9. Tout le reste devient un espace.
+        $str = preg_replace('/[^a-zA-Z0-9]+/', ' ', $str) ?? '';
+        
+        // Nettoyage des espaces multiples et mise en majuscule
+        return strtoupper(trim(preg_replace('/\s+/', ' ', $str)));
     }
 
     private function cleanHeader(string $h): string
     {
+        // Pour les headers, on supprime TOUT espace pour un match strict (NOM, PRENOM, etc)
         return str_replace(' ', '', $this->normaliserChaine($h));
     }
 
     private function logDiag(string $path, string $msg, bool $reset = false): void
     {
-        file_put_contents($path, $msg . "\n", $reset ? 0 : FILE_APPEND);
+        $dir = dirname($path);
+        if (!is_dir($dir)) @mkdir($dir, 0775, true);
+        if (!is_dir($dir)) return;
+        $flags = $reset ? 0 : FILE_APPEND;
+        @file_put_contents($path, $msg . "\n", $flags);
     }
 
     // --- MONEY ---
@@ -172,21 +179,31 @@ class CsvEmployeeReader
             $this->data[$person] = [];
             $this->data[$person]['official_name'] = $this->officialNames[$index] ?? $person;
             $this->data[$person]['forfait_jours'] = false;
-            foreach ($this->listLibelleMoney as $l) $this->data[$person][$l] = ['salarial' => 0, 'patronal' => 0];
-            foreach ($this->categories as $cat) foreach ($cat as $l) $this->data[$person][$l] = ['salarial' => 0, 'patronal' => 0];
-            foreach ($this->descriptionFields as $f) $this->data[$person][$f] = 'no data';
+
+            foreach ($this->listLibelleMoney as $l) {
+                $this->data[$person][$l] = ['salarial' => 0, 'patronal' => 0];
+            }
+            foreach ($this->categories as $cat => $labels) {
+                foreach ($labels as $l) {
+                    $this->data[$person][$l] = ['salarial' => 0, 'patronal' => 0];
+                }
+            }
+            foreach ($this->descriptionFields as $f) {
+                $this->data[$person][$f] = 'no data';
+            }
         }
     }
 
     private function extractValueBsiMoney(array $rows): void
     {
-        $codeIdx = -1; $libIdx = -1; $baseIdx = -1;
+        $codeIdx = -1; $libIdx  = -1; $baseIdx = -1;
+
         foreach ($rows as $r) {
             foreach ($r as $idx => $val) {
                 $clean = $this->cleanHeader($val);
-                if (str_contains($clean, 'CODE')) $codeIdx = $idx;
-                if (str_contains($clean, 'LIBELLE')) $libIdx = $idx;
-                if (str_contains($clean, 'BASES')) $baseIdx = $idx;
+                if ($codeIdx < 0 && str_contains($clean, 'CODE')) $codeIdx = $idx;
+                if ($libIdx < 0 && str_contains($clean, 'LIBELLE')) $libIdx = $idx;
+                if ($baseIdx < 0 && str_contains($clean, 'BASES')) $baseIdx = $idx;
             }
             if ($codeIdx >= 0 && $libIdx >= 0 && $baseIdx >= 0) break;
         }
@@ -197,16 +214,20 @@ class CsvEmployeeReader
             if (!isset($row[$libIdx])) continue;
             $libelle = trim($row[$libIdx]);
             $currentBaseIdx = $baseIdx;
-            
+
             foreach ($this->persons as $person) {
                 if (!isset($this->data[$person])) continue;
+
                 $salarial = $row[$currentBaseIdx + 1] ?? '';
                 $patronal = $row[$currentBaseIdx + 2] ?? '';
                 $baseS    = $row[$currentBaseIdx] ?? '';
 
-                if (in_array($libelle, $this->forfaitJoursKeywords)) {
-                    if (trim($salarial . $patronal . $baseS) !== '') $this->data[$person]['forfait_jours'] = true;
+                if (in_array($libelle, $this->forfaitJoursKeywords, true)) {
+                    if (trim($salarial . $patronal . $baseS) !== '') {
+                        $this->data[$person]['forfait_jours'] = true;
+                    }
                 }
+
                 $this->storeMoney($person, $libelle, $salarial, $patronal);
                 $currentBaseIdx += 3;
             }
@@ -215,23 +236,33 @@ class CsvEmployeeReader
 
     private function storeMoney($person, $libelle, $salarial, $patronal): void
     {
-        $target = $libelle;
-        $isKnown = in_array($libelle, $this->listLibelleMoney);
+        $libelle = trim((string)$libelle);
+        if ($libelle === '') return;
+
+        $libNorm = $this->normaliserChaine($libelle);
+        $isKnown = false;
+
+        foreach ($this->listLibelleMoney as $known) {
+            if ($libNorm === $this->normaliserChaine($known)) { $isKnown = true; break; }
+        }
+
         if (!$isKnown) {
-            foreach ($this->categories as $catName => $items) {
-                if (in_array($libelle, $items)) {
-                    $target = $libelle;
-                    $isKnown = true;
-                    break;
+            foreach ($this->categories as $items) {
+                foreach ($items as $known) {
+                    if ($libNorm === $this->normaliserChaine($known)) { $isKnown = true; break 2; }
                 }
             }
         }
-        if ($isKnown) {
-            if (!isset($this->data[$person][$target])) $this->data[$person][$target] = ['salarial' => 0, 'patronal' => 0];
-            $clean = fn($v) => (float)str_replace([',', ' '], ['.', ''], (string)$v);
-            $this->data[$person][$target]['salarial'] = $clean($salarial);
-            $this->data[$person][$target]['patronal'] = $clean($patronal);
+
+        if (!$isKnown) return;
+
+        if (!isset($this->data[$person][$libelle])) {
+            $this->data[$person][$libelle] = ['salarial' => 0, 'patronal' => 0];
         }
+
+        $clean = fn($v) => (float) str_replace([',', ' '], ['.', ''], (string)$v);
+        $this->data[$person][$libelle]['salarial'] += $clean($salarial);
+        $this->data[$person][$libelle]['patronal'] += $clean($patronal);
     }
 
     // --- JOURS ---
@@ -239,20 +270,17 @@ class CsvEmployeeReader
     private function extractValueJoursBsi(array $rows, string $diagFile): void
     {
         $nomIdx = -1; $prenomIdx = -1; $valIdx = -1;
-
         for ($i = 0; $i < min(5, count($rows)); $i++) {
             foreach ($rows[$i] as $idx => $val) {
                 $clean = $this->cleanHeader($val);
                 if ($clean === 'NOM') $nomIdx = $idx;
-                if (in_array($clean, ['PRENOM', 'PRENOMS'])) $prenomIdx = $idx;
+                if (in_array($clean, ['PRENOM', 'PRENOMS'], true)) $prenomIdx = $idx;
                 if (str_contains($clean, $this->joursColumnKeyword)) $valIdx = $idx;
             }
             if ($nomIdx >= 0 && $prenomIdx >= 0 && $valIdx >= 0) break;
         }
 
-        if ($valIdx === -1) {
-            $valIdx = 6; 
-        }
+        if ($valIdx === -1) $valIdx = 6;
 
         foreach ($rows as $row) {
             $nom = $this->normaliserChaine($row[$nomIdx] ?? '');
@@ -277,18 +305,15 @@ class CsvEmployeeReader
         foreach ($header as $idx => $col) {
             $clean = $this->cleanHeader($col);
             if ($clean === 'NOM') $nomIdx = $idx;
-            if (in_array($clean, ['PRENOM', 'PRENOMS'])) $prenomIdx = $idx;
+            if (in_array($clean, ['PRENOM', 'PRENOMS'], true)) $prenomIdx = $idx;
 
             foreach ($this->descriptionMapping as $field => $keywords) {
                 foreach ($keywords as $kw) {
-                    if (str_contains($clean, $kw)) {
-                        $mapping[$field] = $idx;
-                        break;
-                    }
+                    if (str_contains($clean, $kw)) { $mapping[$field] = $idx; break; }
                 }
             }
         }
-        
+
         if ($nomIdx === -1) return;
 
         foreach ($rows as $i => $row) {
@@ -301,8 +326,8 @@ class CsvEmployeeReader
                 if ($this->data[$p]['nom'] === 'no data') $this->data[$p]['nom'] = trim($row[$nomIdx]);
                 if ($this->data[$p]['prenom'] === 'no data') $this->data[$p]['prenom'] = trim($row[$prenomIdx]);
                 foreach ($mapping as $field => $idx) {
-                     $val = trim($row[$idx] ?? '');
-                     if ($val !== '') $this->data[$p][$field] = $val;
+                    $val = trim($row[$idx] ?? '');
+                    if ($val !== '') $this->data[$p][$field] = $val;
                 }
             });
         }
@@ -315,24 +340,39 @@ class CsvEmployeeReader
             $prenomMatch = str_contains($person, $prenom);
             $initiale = mb_substr($prenom, 0, 1);
             $initialeMatch = str_contains($person, $nom . ' ' . $initiale);
+
             if ($nomMatch && ($prenomMatch || $initialeMatch)) {
                 $onMatch($person);
-                break; 
+                break;
             }
         }
     }
 
+    /**
+     * Méthode corrigée : parcourt tous les libellés extraits et les
+     * additionne s'ils correspondent à la catégorie normalisée.
+     */
     private function sumBsiMoney(): void
     {
         foreach ($this->persons as $p) {
-            foreach ($this->categories as $cat => $keys) {
-                $totS = 0; $totP = 0;
-                foreach ($keys as $k) {
-                    if (isset($this->data[$p][$k])) {
-                        $totS += $this->data[$p][$k]['salarial'];
-                        $totP += $this->data[$p][$k]['patronal'];
+            foreach ($this->categories as $cat => $expectedLabels) {
+                $totS = 0.0;
+                $totP = 0.0;
+
+                // Pré-normalisation des libellés attendus pour cette catégorie
+                $expectedNorms = array_map([$this, 'normaliserChaine'], $expectedLabels);
+
+                foreach ($this->data[$p] as $labelReel => $valeurs) {
+                    if (!is_array($valeurs) || !isset($valeurs['salarial'])) continue;
+
+                    $labelNorm = $this->normaliserChaine((string)$labelReel);
+                    
+                    if (in_array($labelNorm, $expectedNorms, true)) {
+                        $totS += (float)($valeurs['salarial'] ?? 0);
+                        $totP += (float)($valeurs['patronal'] ?? 0);
                     }
                 }
+
                 $this->data[$p][$cat] = ['salarial' => $totS, 'patronal' => $totP];
             }
         }

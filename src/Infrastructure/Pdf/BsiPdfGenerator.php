@@ -32,7 +32,7 @@ class BsiPdfGenerator
         $labelType = $type === 'forfait_heure' ? 'Forfait heures' : 'Forfait jours';
         $fileLabel = $type === 'forfait_heure' ? 'FORFAIT_HEURES' : 'FORFAIT_JOURS';
         $filename  = sprintf('TEST_BSI_%s_%d.pdf', $fileLabel, $campaignYear);
-        
+
         $viewModel = $this->getTestViewModel($type, $campaignYear);
 
         return $this->generatePdf($viewModel, $filename, "BSI de test - {$labelType} {$campaignYear}");
@@ -62,10 +62,10 @@ class BsiPdfGenerator
     {
         $parse = fn($val) => $this->parseAmount($val);
         $isForfaitJours = ($data['forfait_jours'] ?? false) === true;
-        
+
         $nom    = $data['nom'] ?? '';
         $prenom = $data['prenom'] ?? '';
-        
+
         // Logique jours travaillés : Fixe à 218 si Forfait Jours, sinon réel
         $joursTravailles = $isForfaitJours ? '218' : ($data['nb jours travaillés'] ?? '0');
 
@@ -79,18 +79,18 @@ class BsiPdfGenerator
             'type_contrat'     => $data['type_contrat'] ?? 'CDI',
             'label_type'       => $isForfaitJours ? 'Forfait jours' : 'Forfait heures',
             'jours_travailles' => $joursTravailles,
-            'is_forfait_jours' => $isForfaitJours, // Flag pour l'affichage
+            'is_forfait_jours' => $isForfaitJours,
             'is_test'          => false,
         ];
 
-        $salaireBase = $parse($data['Salaire de base']['salarial'] ?? 0);
-        $heuresSupp  = $parse($data['Heures mensuelles majorées']['salarial'] ?? 0);
-        $primes      = $parse($data['Sous-total Primes']['salarial'] ?? 0);
-        $interessement = $parse($data['INTERESSEMENT']['salarial'] ?? 0);
-        $acomptes    = $parse($data['Acomptes']['salarial'] ?? 0);
+        $salaireBase    = $parse($data['Salaire de base']['salarial'] ?? 0);
+        $heuresSupp     = $parse($data['Heures mensuelles majorées']['salarial'] ?? 0);
+        $primes         = $parse($data['Sous-total Primes']['salarial'] ?? 0);
+        $interessement  = $parse($data['INTERESSEMENT']['salarial'] ?? 0);
+        $acomptes       = $parse($data['Acomptes']['salarial'] ?? 0);
 
         $totalBrutAnnuel = $salaireBase + $heuresSupp + $primes + $interessement;
-        
+
         $remuneration = [
             'base_annuelle'      => $salaireBase,
             'heures_supp'        => $heuresSupp,
@@ -99,13 +99,13 @@ class BsiPdfGenerator
             'acomptes'           => $acomptes,
             'total_brut_annuel'  => $totalBrutAnnuel,
             'total_mensuel'      => $totalBrutAnnuel / 12,
-            'equiv_mois'         => ($salaireBase > 0) ? $totalBrutAnnuel * 12 / $salaireBase : 0,
+            'equiv_mois'         => ($salaireBase > 0) ? ($totalBrutAnnuel / ($salaireBase / 12)) : 0,
         ];
 
         // --- AVANTAGES SOCIAUX ---
-        $transport = $parse($data['Frais de transport personnel non soumis']['salarial'] ?? 0) 
-                   + $parse($data['Frais de transport personnel non soumis']['patronal'] ?? 0);
-        
+        $transport = $parse($data['Frais de transport personnel non soumis']['salarial'] ?? 0)
+            + $parse($data['Frais de transport personnel non soumis']['patronal'] ?? 0);
+
         $socialExtra = [
             'transport' => $transport,
             'cheques'   => 190.0,
@@ -122,32 +122,35 @@ class BsiPdfGenerator
             ];
         }
 
-        $social['total'] = [
-            'salarial' => array_sum(array_column($social, 'salarial')),
-            'patronal' => array_sum(array_column($social, 'patronal')),
-        ];
+        // Total (sans doublonner total lui-même)
+        $sumS = 0.0; $sumP = 0.0;
+        foreach ($categories as $cat) {
+            $sumS += (float)$social[$cat]['salarial'];
+            $sumP += (float)$social[$cat]['patronal'];
+        }
+        $social['total'] = ['salarial' => $sumS, 'patronal' => $sumP];
 
         $netAnnuel = $parse($data['Net imposable']['salarial'] ?? 0);
 
         $pouvoirAchat = [
-            'net_annuel' => $netAnnuel,
+            'net_annuel'  => $netAnnuel,
             'net_mensuel' => $netAnnuel / 12,
         ];
 
         return [
-            'identity'     => $identity,
-            'remuneration' => $remuneration,
-            'social_extra' => $socialExtra,
-            'social'       => $social,
-            'pouvoir_achat'=> $pouvoirAchat,
-            'campaign_year'=> $campaignYear,
+            'identity'      => $identity,
+            'remuneration'  => $remuneration,
+            'social_extra'  => $socialExtra,
+            'social'        => $social,
+            'pouvoir_achat' => $pouvoirAchat,
+            'campaign_year' => $campaignYear,
         ];
     }
 
     private function getTestViewModel(string $type, int $campaignYear): array
     {
         $isForfaitJours = ($type === 'forfait_jour');
-        
+
         return [
             'campaign_year' => $campaignYear,
             'identity' => [
@@ -159,7 +162,7 @@ class BsiPdfGenerator
                 'date_arrivee'     => '19/03/' . max(2000, $campaignYear - 3),
                 'type_contrat'     => $isForfaitJours ? 'CDI Forfait jours' : 'CDI',
                 'label_type'       => $isForfaitJours ? 'Forfait jours' : 'Forfait heures',
-                'jours_travailles' => $isForfaitJours ? '218' : '280', // Simulation correcte
+                'jours_travailles' => $isForfaitJours ? '218' : '280',
                 'is_forfait_jours' => $isForfaitJours,
                 'is_test'          => true,
             ],
@@ -198,17 +201,27 @@ class BsiPdfGenerator
 
     private function generatePdf(array $viewModel, string $filename, string $title): string
     {
-        $html = $this->renderHtml($viewModel);
+        // ✅ Fix mémoire immédiat (mPDF polices / TTF)
+        @ini_set('memory_limit', '512M');
 
+        $html = $this->renderHtml($viewModel);
         $path = $this->outputDir . '/' . $filename;
 
-        // Marge du haut 30mm (optimisée pour single page)
+        // tempDir : important en docker et réduit les soucis de cache/fonts
+        $tmpDir = '/tmp';
+        if (!is_dir($tmpDir)) {
+            @mkdir($tmpDir, 0775, true);
+        }
+
+        // ✅ Fix fonts : on force une fonte mPDF connue (évite fallback Calibri)
         $mpdf = new Mpdf([
             'format'        => 'A4',
             'margin_left'   => 5,
             'margin_right'  => 5,
-            'margin_top'    => 30, 
+            'margin_top'    => 30,
             'margin_bottom' => 5,
+            'tempDir'       => $tmpDir,
+            'default_font'  => 'dejavusans',
         ]);
 
         $mpdf->SetTitle($title);
@@ -239,10 +252,10 @@ class BsiPdfGenerator
         $labelHs = $isForfaitJours ? 'Jours RTT rachetés' : 'Heures supplémentaires';
 
         $colors = [
-            'base'   => '#BCEED7', // Vert
-            'hs'     => '#f077f0ff', // Magenta
-            'prime'  => '#ffff83ff', // Jaune
-            'inter'  => '#7bc2f5ff'  // Bleu
+            'base'   => '#BCEED7',
+            'hs'     => '#f077f0ff',
+            'prime'  => '#ffff83ff',
+            'inter'  => '#7bc2f5ff'
         ];
 
         $remuBreakdown = [
@@ -256,9 +269,9 @@ class BsiPdfGenerator
 
         // --- RESSOURCES ---
         $assetsDir = dirname(__DIR__, 3) . '/public/assets/img/';
-        
+
         $logoPath = $assetsDir . 'synergie.png';
-        $logoHtml = file_exists($logoPath) 
+        $logoHtml = file_exists($logoPath)
             ? '<img src="' . $logoPath . '" style="height: 40px; vertical-align: middle;" alt="Synergie" />'
             : '<span style="color: #FFFFFF; font-weight: bold; font-size: 14pt;">SYNERGIE</span>';
 
@@ -276,22 +289,17 @@ class BsiPdfGenerator
         $iconTravail    = $getIcon('travaille.jpg');
 
         // Couleurs
-        $headerDarkBg = '#333333'; 
-        $greenMain    = '#00B050'; 
-        $greenLight   = '#E2F0D9'; 
+        $headerDarkBg = '#333333';
+        $greenMain    = '#00B050';
+        $greenLight   = '#E2F0D9';
         $borderGrey   = '#A6A6A6';
-        $lightGrey    = '#F2F2F2'; 
-        $darkText     = '#002060';   
+        $lightGrey    = '#F2F2F2';
+        $darkText     = '#002060';
         $greyText     = '#555555';
         $rowBlue      = '#D9EAF7';
 
-        $noteBasDePage = $dIdent['is_test'] 
-            ? "Les valeurs sont volontairement nulles pour ce BSI de test." 
-            : "Document confidentiel généré automatiquement.";
-
         $css = $this->getCssDefinition($headerDarkBg, $greenMain, $greenLight, $borderGrey, $lightGrey, $darkText, $greyText, $rowBlue);
 
-        // Helpers pour les puces de couleur
         $bullet = fn($col) => "<span style='color:{$col}; font-size:14pt; line-height:10pt;'>■</span>";
 
         $html = <<<HTML
@@ -321,7 +329,7 @@ class BsiPdfGenerator
     </htmlpageheader>
 
 <div class="page">
-    
+
     <table class="identity-table">
         <tr class="identity-name-row">
             <td>{$dIdent['nom_complet']}</td>
@@ -381,7 +389,7 @@ class BsiPdfGenerator
     </table>
 
     <div class="section-title-spaced">TA REMUNERATION BRUTE ANNUELLE TOTALE</div>
-    
+
     <div class="remu-section">
         <table class="remu-overview-table">
             <tr>
@@ -397,7 +405,7 @@ class BsiPdfGenerator
                 </td>
             </tr>
         </table>
-        
+
         <table class="remu-details-layout">
             <tr>
                 <td style="width: 55%;">
@@ -407,7 +415,7 @@ class BsiPdfGenerator
                         <tr><td class="remu-detail-label">{$bullet($colors['prime'])} Prime annuelle</td><td class="remu-detail-amount">{$fmt($dRemu['prime_annuelle'])}</td></tr>
                         <tr><td class="remu-detail-label">{$bullet($colors['inter'])} Prime d'intéressement</td><td class="remu-detail-amount">{$fmt($dRemu['interessement'])}</td></tr>
                     </table>
-                    
+
                     <table class="remu-highlight-table">
                         <tr>
                             <td class="remu-highlight-label">Ton brut annuel :</td>
@@ -428,7 +436,7 @@ class BsiPdfGenerator
     </div>
 
     <div class="section-title-spaced">TES CHARGES SOCIALES & AVANTAGES SOCIAUX</div>
-    
+
     <table class="social-extra">
         <tr>
             <td style="width: 33%;">
@@ -470,12 +478,12 @@ class BsiPdfGenerator
     </table>
 
     <div class="section-title-spaced">TON POUVOIR D'ACHAT</div>
-    
+
     <div class="power-box">
         <table style="width: 100%; border-collapse: collapse;">
             <tr>
                 <td style="width: 50%; text-align: center; border-right: 1px solid #CCCCCC;">
-                    <div style="font-size: 10pt; font-weight: bold; color: #555;">Net à payer annuel</div>
+                    <div style="font-size: 10pt; font-weight: bold; color: #555;">Net à payer annuel (avant impôt)</div>
                     <div style="font-size: 16pt; font-weight: 800; color: #000; margin-top: 3px;">{$fmt($dPower['net_annuel'])}</div>
                 </td>
                 <td style="width: 50%; text-align: center;">
@@ -493,6 +501,7 @@ class BsiPdfGenerator
 </body>
 </html>
 HTML;
+
         return $html;
     }
 
@@ -545,7 +554,7 @@ HTML;
             $length = $circumference * $percent / 100.0;
             $gap = $circumference - $length;
             $color = htmlspecialchars((string)($segment['color'] ?? '#000'), ENT_QUOTES);
-            
+
             $circles .= sprintf('<circle cx="%F" cy="%F" r="%F" fill="none" stroke="%s" stroke-width="%F" stroke-dasharray="%F %F" stroke-dashoffset="%F" />', $cx, $cy, $radius, $color, $strokeWidth, $length, $gap, -$currentOffset);
             $currentOffset += $length;
 
@@ -580,9 +589,10 @@ SVG;
                 margin-header: 5px;
                 margin-bottom: 10px;
             }
-            body { font-family: Calibri, Arial, sans-serif; font-size: 10pt; color: #000000; }
+            /* ✅ Calibri -> DejaVu Sans (mPDF friendly) */
+            body { font-family: DejaVu Sans, Arial, sans-serif; font-size: 10pt; color: #000000; }
             .page { width: 100%; box-sizing: border-box; }
-            
+
             .mt-50 { margin-top: 25px !important; }
 
             /* HEADER */
@@ -590,26 +600,26 @@ SVG;
             .header-table td { padding: 6px 6px; font-size: 10pt; vertical-align: middle; }
             .header-left { background-color: {$headerDarkBg}; color: #FFFFFF; font-weight: 700; }
             .header-right { background-color: {$headerDarkBg}; color: #FFFFFF; text-align: center; font-weight: 700; font-size: 10pt; }
-            
+
             /* IDENTITÉ */
             .identity-table { width: 100%; border-collapse: collapse; margin-bottom: 10px; margin-top: 5px; }
-            .identity-name-row td { 
-                background-color: #FFFFFF; 
-                color: {$greenMain}; 
-                font-size: 18pt; 
-                font-weight: 700; 
-                text-align: center; 
-                padding: 6px; 
+            .identity-name-row td {
+                background-color: #FFFFFF;
+                color: {$greenMain};
+                font-size: 18pt;
+                font-weight: 700;
+                text-align: center;
+                padding: 6px;
                 text-transform: uppercase;
                 border: none;
             }
-            .identity-poste-row td { 
-                background-color: #FFFFFF; 
-                color: {$greenMain}; 
-                font-size: 14pt; 
-                font-weight: 700; 
-                text-align: center; 
-                padding: 4px; 
+            .identity-poste-row td {
+                background-color: #FFFFFF;
+                color: {$greenMain};
+                font-size: 14pt;
+                font-weight: 700;
+                text-align: center;
+                padding: 4px;
                 border: none;
             }
 
@@ -617,86 +627,76 @@ SVG;
             .info-line-table td { border: 1px solid {$borderGrey}; padding: 3px 6px; vertical-align: middle; }
             .info-label { font-size: 9pt; color: {$greyText}; }
             .info-value { font-size: 10pt; font-weight: 700; color: #000000; }
-            
+
             /* TITRES SECTIONS CENTRÉS */
-            .section-title { 
-                width: 100%; 
-                background-color: {$sectionTitleBg}; 
-                color: {$headerDarkBg}; 
-                font-weight: bold; 
-                font-size: 14pt; 
-                text-transform: uppercase; 
-                padding: 4px 8px; 
-                margin-top: 10px; 
+            .section-title {
+                width: 100%;
+                background-color: {$sectionTitleBg};
+                color: {$headerDarkBg};
+                font-weight: bold;
+                font-size: 14pt;
+                text-transform: uppercase;
+                padding: 4px 8px;
+                margin-top: 10px;
                 margin-bottom: 4px;
                 border: none;
                 text-align: center;
             }
 
             .section-title-spaced {
-                width: 100%; 
-                background-color: {$sectionTitleBg}; 
-                color: {$headerDarkBg}; 
-                font-weight: bold; 
-                font-size: 14pt; 
-                text-transform: uppercase; 
-                padding: 4px 8px; 
+                width: 100%;
+                background-color: {$sectionTitleBg};
+                color: {$headerDarkBg};
+                font-weight: bold;
+                font-size: 14pt;
+                text-transform: uppercase;
+                padding: 4px 8px;
                 margin-top: 25px;
                 margin-bottom: 4px;
                 border: none;
                 text-align: center;
             }
-            
+
             .remu-section { width: 100%; margin-top: 2px; margin-bottom: 5px; }
             .remu-overview-table { width: 100%; border-collapse: collapse; }
             .remu-overview-left .top-label { font-size: 11pt; color: {$greyText}; margin-right: 5px; }
             .remu-overview-left .top-amount { font-size: 16pt; font-weight: 800; margin-right: 5px; color: #000; }
             .remu-overview-left .top-subtitle { font-size: 11pt; font-weight: 700; color: #555; }
-            
+
             .remu-overview-right { font-size: 9pt; }
             .remu-overview-right .amount { font-size: 12pt; font-weight: 700; }
-            
+
             .remu-details-layout { width: 100%; border-collapse: collapse; margin-top: 5px; }
             .remu-detail-table { width: 100%; font-size: 9pt; }
             .remu-detail-amount { text-align: right; }
             .remu-highlight-table { width: 100%; font-weight: bold; margin-top: 5px; font-size: 9pt; background-color: {$rowBlue}; }
             .remu-highlight-amount { text-align: right; font-weight: 700; }
-            /* LABEL EN GRAS */
             .remu-highlight-label { font-weight: 700; }
 
             .donut-wrapper { text-align: center; display: flex; flex-direction: column; align-items: center; }
-            
+
             .social-extra { width: 100%; border-collapse: collapse; margin-bottom: 5px; margin-top: 5px; text-align: center; }
             .social-extra td { padding: 3px; vertical-align: top; }
             .social-extra-amount { font-size: 16pt; font-weight: 700; color: #000000; }
             .social-extra-label { font-size: 9pt; color: {$greyText}; }
             .social-extra-small { font-size: 8pt; color: {$greyText}; font-style: italic; }
 
-            /* Alignement à droite des montants (chiffres) et à gauche des libellés */
             .social-table { width: 100%; border-collapse: collapse; font-size: 8.5pt; margin-top: 2px; }
-            .social-table td, .social-table th { border: 1px solid {$borderGrey}; padding: 3px 4px; text-align: right; } 
+            .social-table td, .social-table th { border: 1px solid {$borderGrey}; padding: 3px 4px; text-align: right; }
             .social-table td:first-child { text-align: left; }
             .social-table thead th { border-bottom: 2px solid {$greenMain}; text-align: center; }
             .social-table tfoot td { background-color: {$greenLight}; font-weight: 700; font-size: 12pt; }
-            
-            .power-box { 
-                width: 100%; 
-                background-color: #F2F2F2; 
-                border: 1px solid #A6A6A6; 
-                padding: 10px 0; 
-                margin-top: 3px; 
+
+            .power-box {
+                width: 100%;
+                background-color: #F2F2F2;
+                border: 1px solid #A6A6A6;
+                padding: 10px 0;
+                margin-top: 3px;
             }
-            
-            .note-text {
-                    font-size: 8pt;
-                    color: {$greyText}; 
-                    margin-top: 2px; 
-                }
-            .footer { 
-                display: flex;
-                align-items: center;
-                justify-content: space-between;
-            }
+
+            .note-text { font-size: 8pt; color: {$greyText}; margin-top: 2px; }
+            .footer { display: flex; align-items: center; justify-content: space-between; }
 CSS;
     }
 }
