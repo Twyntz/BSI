@@ -31,11 +31,44 @@ class CsvEmployeeReader
     ];
 
     private array $categories = [
-        'retraite'   => ["Vieillesse déplafonnée", "Vieillesse plafonnée", "Retraite TU1", "Contribution d'Equilibre Général TU1", "Réduct. générale des cotisat. pat. retraite", "Retraite TU2", "Contribution d'Equilibre Général TU2" ],
-        'maladie'    => ["Maladie - maternité - invalidité - décès", "Maladie supplémentaire Alsace - Moselle", "Maladie supplémentaire Alsace-Moselle"],
-        'chomage'    => ["Assurance chômage TrA+TrB", "AGS", "APEC TrA", "APEC TrB"],
-        'prevoyance' => ["Prévoyance non cadre TrA", "Prévoyance cadre TrA", "Prévoyance cadre TrB", "Prévoyance non cadre", "Prévoyance non cadre Tr1", "Prévoyance non cadre Tr2" ],
-        'mutuelle'   => ["Mutuelle Forfait Allan", "Frais de santé cadre forfait", "Frais de santé non cadre forfait direct", "Contat de santé forfait"],
+        'retraite'   => [
+            "Retraite TU1", 
+            "Contribution d'Equilibre Général TU1", 
+            "Contribution d'Equilibre Technique TU1", 
+            "Contribution d'Equilibre Technique TU2", 
+            "Réduct. générale des cotisat. pat. retraite", 
+            "Retraite TU2", 
+            "Contribution d'Equilibre Général TU2" 
+        ],
+        'maladie'    => [
+            "Maladie - maternité - invalidité - décès", 
+            "Maladie - maternité - invalidité - décès - exo part app",
+            "Maladie supplémentaire Alsace - Moselle", 
+            "Maladie supplémentaire Alsace-Moselle"
+        ],
+        'chomage'    => [
+            "Assurance chômage TrA+TrB", 
+            "Assurance chômage TrA+TrB - exo part apprenti",I
+            "AGS"
+        ],
+        'prevoyance' => [
+            "Prévoyance non cadre TrA", 
+            "Prévoyance cadre TrA", 
+            "Prévoyance cadre TrB", 
+            "Prévoyance non cadre",  
+            "prévoyance supplémentaire non cadre TrA", 
+            "Prévoyance non cadre Tr1", 
+            "Prévoyance non cadre Tr2" ,
+            "Prévoyance décès cadre"
+        ],
+        'mutuelle'   => [
+            "Mutuelle Forfait Alan",
+            "Frais de santé cadre forfait",
+            "Frais de santé supplémentaires cadre forfait",  
+            "Frais de santé non cadre forfait direct", 
+            "Frais de santé",
+            "Frais de santé forfait régime local"
+        ],
     ];
 
     private array $forfaitJoursKeywords = ["RTT pris (j)", "RTT acquis (j)", "RTT et autres repos", "Indemnités Jours de repos 10%"];
@@ -50,7 +83,7 @@ class CsvEmployeeReader
         $this->officialNames = [];
 
         $diagFile = dirname(__DIR__, 3) . '/public/RESULT/diagnostic.txt';
-        $this->logDiag($diagFile, "=== DÉBUT DIAGNOSTIC (V6 - Fix Encoding & RTT) ===", true);
+        $this->logDiag($diagFile, "=== DÉBUT DIAGNOSTIC (V7 - Fix Alan & Apprentis) ===", true);
 
         // 1. Money
         $moneyRows = $this->readTableFile($bsiMoneyPath);
@@ -95,7 +128,6 @@ class CsvEmployeeReader
         return ($ext === 'csv') ? $this->readCsvFile($path) : $this->readExcelFile($path);
     }
 
-    // --- CORRECTION MAJEURE ICI : GESTION DE L'ENCODAGE ---
     private function readCsvFile(string $path): array
     {
         $rows = [];
@@ -107,7 +139,6 @@ class CsvEmployeeReader
         $separator = (str_contains((string)$firstLine, ';')) ? ';' : ',';
 
         while (($row = fgetcsv($handle, 0, $separator)) !== false) {
-            // Utilisation de la méthode convertToUtf8 pour éviter de casser les accents
             $rows[] = array_map(fn($v) => $v === null ? '' : $this->convertToUtf8((string)$v), $row);
         }
         fclose($handle);
@@ -116,8 +147,6 @@ class CsvEmployeeReader
 
     private function convertToUtf8(string $str): string
     {
-        // Si la chaîne est déjà en UTF-8 valide, on la garde telle quelle.
-        // Sinon, on tente une conversion depuis Windows-1252 (format Excel standard).
         return mb_check_encoding($str, 'UTF-8') 
             ? $str 
             : mb_convert_encoding($str, 'UTF-8', 'Windows-1252');
@@ -240,9 +269,6 @@ class CsvEmployeeReader
         $libNorm = $this->normaliserChaine($libelle);
         $clean = fn($v) => (float) str_replace([',', ' '], ['.', ''], (string)$v);
 
-        // --- CORRECTION MAJEURE ICI : DETECTION ROBUSTE DES RTT ---
-        // On utilise str_contains pour éviter les problèmes d'accents sur "Indemnités"
-        // Le libellé complet est "Indemnités Jours de repos 10%"
         if (str_contains($libNorm, 'JOURS DE REPOS 10')) {
             $this->data[$person]['rtt_rachetes'] += $clean($salarial);
         }
