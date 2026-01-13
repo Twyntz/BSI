@@ -89,17 +89,21 @@ class BsiPdfGenerator
         $interessement = $parse($data['INTERESSEMENT']['salarial'] ?? 0);
         $acomptes      = $parse($data['Acomptes']['salarial'] ?? 0);
         
-        // --- MODIFICATION 1 : Récupération des RTT rachetés ---
-        // Cette clé 'rtt_rachetes' est fournie par le CsvEmployeeReader corrigé précédemment
         $rttRachetes   = $parse($data['rtt_rachetes'] ?? 0);
 
-        // Ajout des RTT au total brut annuel (important pour que le total affiché soit cohérent)
-        $totalBrutAnnuel = $salaireBase + $heuresSupp + $primes + $interessement + $rttRachetes;
+        // --- MODIFICATION ICI : Calcul du Total Brut Annuel ---
+        if ($isForfaitJours) {
+            // Si Forfait Jours : On EXCLUT les RTT rachetés du total
+            $totalBrutAnnuel = $salaireBase + $primes + $interessement;
+        } else {
+            // Si Forfait Heures (Standard) : On inclut tout (dont les HS)
+            $totalBrutAnnuel = $salaireBase + $heuresSupp + $primes + $interessement;
+        }
 
         $remuneration = [
             'base_annuelle'     => $salaireBase,
             'heures_supp'       => $heuresSupp,
-            'rtt_rachetes'      => $rttRachetes, // Stockage de la valeur RTT
+            'rtt_rachetes'      => $rttRachetes, // On garde la valeur pour l'affichage ligne
             'prime_annuelle'    => $primes,
             'interessement'     => $interessement,
             'acomptes'          => $acomptes,
@@ -175,7 +179,7 @@ class BsiPdfGenerator
             'remuneration' => [
                 'base_annuelle'     => 0.0,
                 'heures_supp'       => 0.0,
-                'rtt_rachetes'      => 0.0, // Initialisation pour éviter les erreurs
+                'rtt_rachetes'      => 0.0, 
                 'prime_annuelle'    => 0.0,
                 'interessement'     => 0.0,
                 'acomptes'          => 0.0,
@@ -208,19 +212,16 @@ class BsiPdfGenerator
 
     private function generatePdf(array $viewModel, string $filename, string $title): string
     {
-        // ✅ Fix mémoire immédiat (mPDF polices / TTF)
         @ini_set('memory_limit', '512M');
 
         $html = $this->renderHtml($viewModel);
         $path = $this->outputDir . '/' . $filename;
 
-        // tempDir : important en docker et réduit les soucis de cache/fonts
         $tmpDir = '/tmp';
         if (!is_dir($tmpDir)) {
             @mkdir($tmpDir, 0775, true);
         }
 
-        // ✅ Fix fonts : on force une fonte mPDF connue (évite fallback Calibri)
         $mpdf = new Mpdf([
             'format'        => 'A4',
             'margin_left'   => 5,
@@ -260,8 +261,13 @@ class BsiPdfGenerator
         // 1. Choix du label
         $labelHs = $isForfaitJours ? 'Jours RTT rachetés' : 'Heures supplémentaires';
         
-        // 2. Choix du montant (CORRECTION ICI : On prend RTT si forfait jours, sinon HS)
+        // 2. Choix du montant pour l'affichage TABLEAU (On garde la valeur réelle)
         $montantHsOuRtt = $isForfaitJours ? ($dRemu['rtt_rachetes'] ?? 0.0) : ($dRemu['heures_supp'] ?? 0.0);
+
+        // 3. Choix de la valeur pour le GRAPHIQUE (Camembert)
+        // SI Forfait Jours -> 0 (Exclu du schéma)
+        // SI Forfait Heures -> Montant HS (Inclus)
+        $valeurPourGraphique = $isForfaitJours ? 0.0 : $montantHsOuRtt;
 
         $colors = [
             'base'   => '#BCEED7',
@@ -272,8 +278,8 @@ class BsiPdfGenerator
 
         $remuBreakdown = [
             ['label' => 'Salaire de base annuel', 'color' => $colors['base'],  'value' => $dRemu['base_annuelle']],
-            // Utilisation de la variable dynamique pour la valeur aussi
-            ['label' => $labelHs,                 'color' => $colors['hs'],    'value' => $montantHsOuRtt],
+            // Utilisation de la variable spécifique graphique (0 si forfait jours)
+            ['label' => $labelHs,                 'color' => $colors['hs'],    'value' => $valeurPourGraphique],
             ['label' => 'Prime annuelle',         'color' => $colors['prime'], 'value' => $dRemu['prime_annuelle']],
             ['label' => "Prime d'intéressement",  'color' => $colors['inter'], 'value' => $dRemu['interessement']],
         ];

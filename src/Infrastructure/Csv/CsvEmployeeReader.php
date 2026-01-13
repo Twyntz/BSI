@@ -48,7 +48,7 @@ class CsvEmployeeReader
         ],
         'chomage'    => [
             "Assurance chômage TrA+TrB", 
-            "Assurance chômage TrA+TrB - exo part apprenti",I
+            "Assurance chômage TrA+TrB - exo part apprenti",
             "AGS"
         ],
         'prevoyance' => [
